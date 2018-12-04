@@ -3,7 +3,7 @@ import unittest
 
 ASSIGNMENT_ID = 155
 
-class TestIntegrations(unittest.TestCase):
+class TestDiagnostics(unittest.TestCase):
     def setUp(self):
         self.app = app.test_client()
 
@@ -32,15 +32,24 @@ class TestIntegrations(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json['columns']), 8)
 
+    def test_ping(self):
+        response = self.app.get('/ping')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['rest']['error'], False)
+
+class TestProcesses(unittest.TestCase):
+    def setUp(self):
+        self.app = app.test_client()
+
     def test_processlist(self):
         response = self.app.get('/processlist')
         self.assertEqual(response.status_code, 200)
         self.assertGreater(len(response.json['processlist_data']), 1)
 
-    def test_ping(self):
-        response = self.app.get('/ping')
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['rest']['error'], False)
+
+class TestErrors(unittest.TestCase):
+    def setUp(self):
+        self.app = app.test_client()
 
 # ******************************************************************************
 # * Forced error endpoints                                                     *
@@ -54,6 +63,10 @@ class TestIntegrations(unittest.TestCase):
         response = self.app.get('/test_other_error')
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.json['rest']['error'], "Error: division by zero")
+
+class TestContent(unittest.TestCase):
+    def setUp(self):
+        self.app = app.test_client()
 
 # ******************************************************************************
 # * Assignment endpoints                                                       *
