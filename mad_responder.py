@@ -13,6 +13,8 @@ from urllib.parse import parse_qs
 
 # SQL statements
 SQL = {
+    'CVREL': "SELECT subject,relationship,object FROM cv_relationship_vw WHERE subject_id=%s OR object_id=%s",
+    'CVTERMREL': "SELECT subject,relationship,object FROM cv_term_relationship_vw WHERE subject_id=%s OR object_id=%s",
 }
 
 __version__ = '0.1.0'
@@ -184,6 +186,45 @@ def showColumns(result,table):
     except Exception as e:
         raise InvalidUsage(sqlError(e), 500)
         return 0
+
+
+def getAdditionalCVData(id):
+    id = str(id)
+    g.c.execute(SQL['CVREL'],(id,id))
+    cvrel = g.c.fetchall()
+    return cvrel
+
+
+def getCVData(result,cvs):
+    result['cv_data'] = []
+    try:
+        for c in cvs:
+            cv = c
+            if ('id' in c) and (not IDCOLUMN):
+                cvrel = getAdditionalCVData(c['id'])
+                cv['relationships'] = list(cvrel)
+            result['cv_data'].append(cv)
+    except Exception as e:
+        raise InvalidUsage(sqlError(e), 500)
+
+def getAdditionalCVTermData(id):
+    id = str(id)
+    g.c.execute(SQL['CVTERMREL'],(id,id))
+    cvrel = g.c.fetchall()
+    return cvrel
+
+
+def getCVTermData(result,cvterms):
+    result['cvterm_data'] = []
+    try:
+        for c in cvterms:
+            cvterm = c
+            if ('id' in c) and (not IDCOLUMN):
+                cvtermrel = getAdditionalCVTermData(c['id'])
+                cvterm['relationships'] = list(cvtermrel)
+            result['cvterm_data'].append(cvterm)
+    except Exception as e:
+        raise InvalidUsage(sqlError(e), 500)
 
 
 def generateResponse(result):
@@ -377,6 +418,336 @@ def testothererror():
         testval = 4 / 0
     except Exception as e:
         raise InvalidUsage(sqlError(e), 500)
+
+
+# ******************************************************************************
+# * CV/CV term endpoints                                                       *
+# ******************************************************************************
+@app.route('/cvs/columns', methods=['GET'])
+def getCVColumns():
+    '''
+    Get columns from cv table
+    Show the columns in the cv table, which may be used to filter results for the /cvs and /cv_ids endpoints.
+    ---
+    tags:
+      - CV
+    responses:
+      200:
+          description: Columns in cv table
+    '''
+    result = initializeResult()
+    showColumns(result,"cv")
+    return generateResponse(result)
+
+
+@app.route('/cv_ids', methods=['GET'])
+def getCVIds():
+    '''
+    Get CV IDs (with filtering)
+    Return a list of CV IDs. The caller can filter on any of the columns in the cv table. Inequalities (!=) and some relational operations (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). The returned list may be ordered by specifying a column with the _sort key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - CV
+    responses:
+      200:
+          description: List of one or more CV IDs
+      404:
+          description: CVs not found
+    '''
+    result = initializeResult()
+    if executeSQL(result,'SELECT id FROM cv','temp'):
+        result['cv_ids'] = []
+        for c in result['temp']:
+            result['cv_ids'].append(c['id'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/cvs/<string:id>', methods=['GET'])
+def getCVById(id):
+    '''
+    Get CV information for a given ID
+    Given an ID, return a row from the cv table. Specific columns from the cv table can be returned with the _columns key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - CV
+    parameters:
+      - in: path
+        name: id
+        type: string
+        required: true
+        description: CV ID
+    responses:
+      200:
+          description: Information for one CV
+      404:
+          description: CV ID not found
+    '''
+    result = initializeResult()
+    if executeSQL(result,'SELECT * FROM cv','temp',id):
+        getCVData(result,result['temp'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/cvs', methods=['GET'])
+def getCVInfo():
+    '''
+    Get CV information (with filtering)
+    Return a list of CVs (rows from the cv table). The caller can filter on any of the columns in the cv table. Inequalities (!=) and some relational operations (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). Specific columns from the cv table can be returned with the _columns key. The returned list may be ordered by specifying a column with the _sort key. In both cases, multiple columns would be separated by a comma.
+    ---
+    tags:
+      - CV
+    responses:
+      200:
+          description: List of information for one or more CVs
+      404:
+          description: CVs not found
+    '''
+    result = initializeResult()
+    if executeSQL(result,'SELECT * FROM cv','temp'):
+        getCVData(result,result['temp'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/cv', methods=['OPTIONS', 'POST'])
+def addCV(): # pragma: no cover
+    '''
+    Add CV
+    ---
+    tags:
+      - CV
+    parameters:
+      - in: query
+        name: name
+        type: string
+        required: true
+        description: CV name
+      - in: query
+        name: definition
+        type: string
+        required: true
+        description: CV description
+      - in: query
+        name: display_name
+        type: string
+        required: false
+        description: CV display name (defaults to CV name)
+      - in: query
+        name: version
+        type: string
+        required: false
+        description: CV version (defaults to 1)
+      - in: query
+        name: is_current
+        type: string
+        required: false
+        description: is CV current? (defaults to 1)
+    responses:
+      200:
+          description: CV added
+      400:
+          description: Missing arguments
+    '''
+    result = initializeResult()
+    if request.method == 'OPTIONS':
+        return generateResponse(result)
+    pd = dict()
+    if request.form:
+        result['rest']['form'] = request.form
+        for i in request.form:
+            pd[i] = request.form[i]
+    missing = ''
+    for p in ['name','definition']:
+        if p not in pd:
+            missing = missing + p + ' '
+    if missing:
+        raise InvalidUsage('Missing arguments: ' + missing)
+    if 'display_name' not in pd:
+      pd['display_name'] = pd['name']
+    if 'version' not in pd:
+      pd['version'] = 1
+    if 'is_current' not in pd:
+      pd['is_current'] = 1
+    if not result['rest']['error']:
+        try:
+            bind = (pd['name'],pd['definition'],pd['display_name'],pd['version'],pd['is_current'],)
+            result['rest']['sql_statement'] = SQL['INSERT_CV'] % bind
+            g.c.execute(SQL['INSERT_CV'],bind)
+            result['rest']['row_count'] = g.c.rowcount
+            result['rest']['inserted_id'] = g.c.lastrowid
+            g.db.commit()
+        except Exception as e:
+            raise InvalidUsage(sqlError(e), 500)
+            g.db.rollback()
+    return generateResponse(result)
+
+
+@app.route('/cvterms/columns', methods=['GET'])
+def getCVTermColumns():
+    '''
+    Get columns from cv_term_vw table
+    Show the columns in the cv_term_vw table, which may be used to filter results for the /cvterms and /cvterm_ids endpoints.
+    ---
+    tags:
+      - CV
+    responses:
+      200:
+          description: Columns in cv_term_vw table
+    '''
+    result = initializeResult()
+    showColumns(result,"cv_term_vw")
+    return generateResponse(result)
+
+
+@app.route('/cvterm_ids', methods=['GET'])
+def getCVTermIds():
+    '''
+    Get CV term IDs (with filtering)
+    Return a list of CV term IDs. The caller can filter on any of the columns in the cv_term_vw table. Inequalities (!=) and some relational operations (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). The returned list may be ordered by specifying a column with the _sort key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - CV
+    responses:
+      200:
+          description: List of one or more CV term IDs
+      404:
+          description: CV terms not found
+    '''
+    result = initializeResult()
+    if executeSQL(result,'SELECT id FROM cv_term_vw','temp'):
+        result['cvterm_ids'] = []
+        for c in result['temp']:
+            result['cvterm_ids'].append(c['id'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/cvterms/<string:id>', methods=['GET'])
+def getCVTermById(id):
+    '''
+    Get CV term information for a given ID
+    Given an ID, return a row from the cv_term_vw table. Specific columns from the cv_term_vw table can be returned with the _columns key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - CV
+    parameters:
+      - in: path
+        name: id
+        type: string
+        required: true
+        description: CV term ID
+    responses:
+      200:
+          description: Information for one CV term
+      404:
+          description: CV term ID not found
+    '''
+    result = initializeResult()
+    if executeSQL(result,'SELECT * FROM cv_term_vw','temp',id):
+        getCVTermData(result,result['temp'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/cvterms', methods=['GET'])
+def getCVTermInfo():
+    '''
+    Get CV term information (with filtering)
+    Return a list of CV terms (rows from the cv_term_vw table). The caller can filter on any of the columns in the cv_term_vw table. Inequalities (!=) and some relational operations (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). Specific columns from the cv_term_vw table can be returned with the _columns key. The returned list may be ordered by specifying a column with the _sort key. In both cases, multiple columns would be separated by a comma.
+    ---
+    tags:
+      - CV
+    responses:
+      200:
+          description: List of information for one or more CV terms
+      404:
+          description: CV terms not found
+    '''
+    result = initializeResult()
+    if executeSQL(result,'SELECT * FROM cv_term_vw','temp'):
+        getCVTermData(result,result['temp'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/cvterm', methods=['OPTIONS', 'POST'])
+def addCVTerm(): # pragma: no cover
+    '''
+    Add CV term
+    ---
+    tags:
+      - CV
+    parameters:
+      - in: query
+        name: cv
+        type: string
+        required: true
+        description: CV name
+      - in: query
+        name: name
+        type: string
+        required: true
+        description: CV term name
+      - in: query
+        name: definition
+        type: string
+        required: true
+        description: CV term description
+      - in: query
+        name: display_name
+        type: string
+        required: false
+        description: CV term display name (defaults to CV term name)
+      - in: query
+        name: is_current
+        type: string
+        required: false
+        description: is CV term current? (defaults to 1)
+      - in: query
+        name: data_type
+        type: string
+        required: false
+        description: data type (defaults to text)
+    responses:
+      200:
+          description: CV term added
+      400:
+          description: Missing arguments
+    '''
+    result = initializeResult()
+    if request.method == 'OPTIONS':
+        return generateResponse(result)
+    pd = dict()
+    if request.form:
+        result['rest']['form'] = request.form
+        for i in request.form:
+            pd[i] = request.form[i]
+    missing = ''
+    for p in ['cv','name','definition']:
+        if p not in pd:
+            missing = missing + p + ' '
+    if missing:
+        raise InvalidUsage('Missing arguments: ' + missing)
+    if 'display_name' not in pd:
+      pd['display_name'] = pd['name']
+    if 'is_current' not in pd:
+      pd['is_current'] = 1
+    if 'data_type' not in pd:
+      pd['data_type'] = 'text'
+    if not result['rest']['error']:
+        try:
+            bind = (pd['cv'],pd['name'],pd['definition'],pd['display_name'],pd['is_current'],pd['data_type'],)
+            result['rest']['sql_statement'] = SQL['INSERT_CVTERM'] % bind
+            g.c.execute(SQL['INSERT_CVTERM'],bind)
+            result['rest']['row_count'] = g.c.rowcount
+            result['rest']['inserted_id'] = g.c.lastrowid
+            g.db.commit()
+        except Exception as e:
+            raise InvalidUsage(sqlError(e), 500)
+            g.db.rollback()
+    return generateResponse(result)
 
 
 # ******************************************************************************
