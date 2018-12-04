@@ -1,8 +1,13 @@
 language: python
 python:
   - "3.6"
-# command to install dependencies
+# Install dependencies
 install:
   - pip install -r requirements.txt
+# Include MySQL
+services:
+  - mysql
+before_install:
+  - mysql -e 'CREATE DATABASE IF NOT EXISTS mad;'
 script: 
   - python test_base.py
