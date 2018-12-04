@@ -470,6 +470,104 @@ def getAssignmentInfo():
     return generateResponse(result)
 
 
+@app.route('/assignmentprops/columns', methods=['GET'])
+def getAssignmentpropColumns():
+    '''
+    Get columns from assignment_property_vw table
+    Show the columns in the assignment_property_vw table, which may be used to filter results for the
+    /assignmentprops and /assignmentprop_ids endpoints.
+    ---
+    tags:
+      - Assignment
+    responses:
+      200:
+          description: Columns in assignment_prop_vw table
+    '''
+    result = initializeResult()
+    showColumns(result, "assignment_property_vw")
+    return generateResponse(result)
+
+
+@app.route('/assignmentprop_ids', methods=['GET'])
+def getAssignmentpropIds():
+    '''
+    Get assignment property IDs (with filtering)
+    Return a list of assignment property IDs. The caller can filter on any of the columns in the
+    assignment_property_vw table. Inequalities (!=) and some relational operations (&lt;= and &gt;=)
+    are supported. Wildcards are supported (use "*"). The returned list may be ordered by specifying
+    a column with the _sort key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - Assignment
+    responses:
+      200:
+          description: List of one or more assignment property IDs
+      404:
+          description: Assignment properties not found
+    '''
+    result = initializeResult()
+    if executeSQL(result,'SELECT id FROM assignment_property_vw', 'temp'):
+        result['assignmentprop_ids'] = []
+        for c in result['temp']:
+            result['assignmentprop_ids'].append(c['id'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/assignmentprops/<string:id>', methods=['GET'])
+def getAssignmentpropsById(id):
+    '''
+    Get assignment property information for a given ID
+    Given an ID, return a row from the assignment_property_vw table. Specific columns from the
+    assignment_property_vw table can be returned with the _columns key. Multiple columns should
+    be separated by a comma.
+    ---
+    tags:
+      - Assignment
+    parameters:
+      - in: path
+        name: id
+        type: string
+        required: true
+        description: assignment property ID
+    responses:
+      200:
+          description: Information for one assignment property
+      404:
+          description: Assignment property ID not found
+    '''
+    result = initializeResult()
+    executeSQL(result,'SELECT * FROM assignment_property_vw', 'assignmentprop_data',id)
+    return generateResponse(result)
+
+
+@app.route('/assignmentprops', methods=['GET'])
+def getAssignmentpropInfo():
+    '''
+    Get assignment property information (with filtering)
+    Return a list of assignment properties (rows from the assignment_property_vw table). The caller
+    can filter on any of the columns in the assignment_property_vw table. Inequalities (!=) and some
+    relational operations (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). Specific
+    columns from the assignment_property_vw table can be returned with the _columns key. The returned
+    list may be ordered by specifying a column with the _sort key. In both cases, multiple columns
+    would be separated by a comma.
+    ---
+    tags:
+      - Assignment
+    responses:
+      200:
+          description: List of information for one or more assignment properties
+      404:
+          description: Assignment properties not found
+    '''
+    result = initializeResult()
+    executeSQL(result,'SELECT * FROM assignment_property_vw', 'assignmentprop_data')
+    return generateResponse(result)
+
+
+# ******************************************************************************
+# * User endpoints                                                             *
+# ******************************************************************************
 @app.route('/users', methods=['GET'])
 def getUserInfo():
     '''

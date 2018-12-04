@@ -2,6 +2,7 @@ from mad_responder import app
 import unittest
 
 ASSIGNMENT_ID = 155
+ASSIGNMENTPROP_ID = 70397
 
 class TestDiagnostics(unittest.TestCase):
     def setUp(self):
@@ -95,6 +96,32 @@ class TestContent(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['assignment_data'][0]['is_complete'], 1)
         response = self.app.get('/assignments/0')
+        self.assertEqual(response.status_code, 404)
+
+    def test_assignmentprop_ids(self):
+        response = self.app.get('/assignmentprop_ids?type=tbars_missing_psds')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['assignmentprop_ids']), 25)
+        response = self.app.get('/assignmentprop_ids?type=no_such_type')
+        self.assertEqual(response.status_code, 404)
+
+    def test_assignmentprops(self):
+        response = self.app.get('/assignmentprops?type=tbars_missing_psds')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['assignmentprop_data']), 25)
+        response = self.app.get('/assignmentprops?type=no_such_type')
+        self.assertEqual(response.status_code, 404)
+
+    def test_assignmentprop_columns(self):
+        response = self.app.get('/assignmentprops/columns')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json['columns']), 7)
+
+    def test_assignmentprop_id(self):
+        response = self.app.get('/assignmentprops/' + str(ASSIGNMENTPROP_ID))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['assignmentprop_data'][0]['type'], 'assign_dvid_url')
+        response = self.app.get('/assignmentprops/0')
         self.assertEqual(response.status_code, 404)
 
 # ******************************************************************************
