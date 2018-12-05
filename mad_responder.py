@@ -126,7 +126,7 @@ def generateSQL(result,sql,query=False):
         if type(query_string) is not str:
             query_string = query_string.decode('utf-8')
         pd = parse_qs(query_string)
-        separator = ' WHERE'
+        separator = ' AND' if ' WHERE ' in sql else ' WHERE'
         for key,val in pd.items():
             if key == '_sort':
                 order = ' ORDER BY '  + val[0]
@@ -838,6 +838,52 @@ def getAssignmentInfo():
     '''
     result = initializeResult()
     executeSQL(result,'SELECT * FROM assignment_vw', 'assignment_data')
+    return generateResponse(result)
+
+
+@app.route('/assignments_completed', methods=['GET'])
+def getAssignmentCompletedInfo():
+    '''
+    Get completed assignment information (with filtering)
+    Return a list of assignments (rows from the assignment_vw table) that have been completed. The caller
+    can filter on any of the columns in the assignment_vw table. Inequalities (!=) and some relational operations
+    (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). Specific columns from the assignment_vw
+    table can be returned with the _columns key. The returned list may be ordered by specifying a column with the
+    _sort key. In both cases, multiple columns would be separated by a comma.
+    ---
+    tags:
+      - Assignment
+    responses:
+      200:
+          description: List of information for one or more completed assignments
+      404:
+          description: Assignments not found
+    '''
+    result = initializeResult()
+    executeSQL(result,'SELECT * FROM assignment_vw WHERE is_complete=1', 'assignment_data')
+    return generateResponse(result)
+
+
+@app.route('/assignments_remaining', methods=['GET'])
+def getAssignmentRemainingInfo():
+    '''
+    Get remaining assignment information (with filtering)
+    Return a list of assignments (rows from the assignment_vw table) that haven't been completed yet. The caller
+    can filter on any of the columns in the assignment_vw table. Inequalities (!=) and some relational operations
+    (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). Specific columns from the assignment_vw
+    table can be returned with the _columns key. The returned list may be ordered by specifying a column with the
+    _sort key. In both cases, multiple columns would be separated by a comma.
+    ---
+    tags:
+      - Assignment
+    responses:
+      200:
+          description: List of information for one or more remaining assignments
+      404:
+          description: Assignments not found
+    '''
+    result = initializeResult()
+    executeSQL(result,'SELECT * FROM assignment_vw WHERE is_complete=0', 'assignment_data')
     return generateResponse(result)
 
 

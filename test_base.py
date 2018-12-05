@@ -153,6 +153,16 @@ class TestContent(unittest.TestCase):
         response = self.app.get('/assignments/0')
         self.assertEqual(response.status_code, 404)
 
+    def test_assignments_completed(self):
+        response = self.app.get('/assignments_completed?annotation=psd_annot')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['assignment_data']), 1044)
+
+    def test_assignments_remaining(self):
+        response = self.app.get('/assignments_remaining')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['assignment_data']), 1)
+
     def test_assignmentprop_ids(self):
         response = self.app.get('/assignmentprop_ids?type=tbars_missing_psds')
         self.assertEqual(response.status_code, 200)
