@@ -864,6 +864,29 @@ def getAssignmentCompletedInfo():
     return generateResponse(result)
 
 
+@app.route('/assignments_open', methods=['GET'])
+def getAssignmentOpen():
+    '''
+    Get open assignment information (with filtering)
+    Return a list of assignments (rows from the assignment_vw table) that haven't been started yet. The caller
+    can filter on any of the columns in the assignment_vw table. Inequalities (!=) and some relational operations
+    (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). Specific columns from the assignment_vw
+    table can be returned with the _columns key. The returned list may be ordered by specifying a column with the
+    _sort key. In both cases, multiple columns would be separated by a comma.
+    ---
+    tags:
+      - Assignment
+    responses:
+      200:
+          description: List of information for one or more open assignments
+      404:
+          description: Assignments not found
+    '''
+    result = initializeResult()
+    executeSQL(result,"SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date='0000-00-00'", 'assignment_data')
+    return generateResponse(result)
+
+
 @app.route('/assignments_remaining', methods=['GET'])
 def getAssignmentRemainingInfo():
     '''
@@ -884,6 +907,29 @@ def getAssignmentRemainingInfo():
     '''
     result = initializeResult()
     executeSQL(result,'SELECT * FROM assignment_vw WHERE is_complete=0', 'assignment_data')
+    return generateResponse(result)
+
+
+@app.route('/assignments_started', methods=['GET'])
+def getAssignmentStarted():
+    '''
+    Get started assignment information (with filtering)
+    Return a list of assignments (rows from the assignment_vw table) that have been started but not completed. The
+    caller can filter on any of the columns in the assignment_vw table. Inequalities (!=) and some relational
+    operations (&lt;= and &gt;=) are supported. Wildcards are supported (use "*"). Specific columns from the
+    assignment_vw table can be returned with the _columns key. The returned list may be ordered by specifying
+    a column with the _sort key. In both cases, multiple columns would be separated by a comma.
+    ---
+    tags:
+      - Assignment
+    responses:
+      200:
+          description: List of information for one or more started assignments
+      404:
+          description: Assignments not found
+    '''
+    result = initializeResult()
+    executeSQL(result,"SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date>'0000-00-00'", 'assignment_data')
     return generateResponse(result)
 
 

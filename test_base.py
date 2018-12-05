@@ -3,6 +3,8 @@ import unittest
 
 ASSIGNMENT_ID = 155
 ASSIGNMENTPROP_ID = 70397
+OPENED = 0
+STARTED = 0
 
 class TestDiagnostics(unittest.TestCase):
     def setUp(self):
@@ -158,10 +160,22 @@ class TestContent(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertGreaterEqual(len(response.json['assignment_data']), 1044)
 
+    def test_assignments_open(self):
+        response = self.app.get('/assignments_open')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['assignment_data']), 1)
+        OPENED = len(response.json['assignment_data'])
+
+    def test_assignments_started(self):
+        response = self.app.get('/assignments_started')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['assignment_data']), 1)
+        STARTED = len(response.json['assignment_data'])
+
     def test_assignments_remaining(self):
         response = self.app.get('/assignments_remaining')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignment_data']), 1)
+        self.assertGreaterEqual(len(response.json['assignment_data']), OPENED + STARTED)
 
     def test_assignmentprop_ids(self):
         response = self.app.get('/assignmentprop_ids?type=tbars_missing_psds')
