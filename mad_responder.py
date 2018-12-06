@@ -174,8 +174,7 @@ def executeSQL(result, sql, container, query=False):
         result[container] = rows
         result['rest']['row_count'] = len(rows)
         return 1
-    else:
-        raise InvalidUsage("No rows returned for query %s" % (sql,), 404)
+    raise InvalidUsage("No rows returned for query %s" % (sql,), 404)
 
 
 def showColumns(result, table):
