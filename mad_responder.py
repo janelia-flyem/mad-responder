@@ -854,7 +854,7 @@ def getAnnotationsById(sid):
         name: sid
         type: string
         required: true
-        description: assignment ID
+        description: annotation ID
     responses:
       200:
           description: Information for one annotation
@@ -888,6 +888,106 @@ def getAnnotationInfo():
     '''
     result = initializeResult()
     executeSQL(result, 'SELECT * FROM annotation_vw', 'annotation_data')
+    return generateResponse(result)
+
+
+@app.route('/annotationprops/columns', methods=['GET'])
+def getAnnotationpropColumns():
+    '''
+    Get columns from annotation_property_vw table
+    Show the columns in the annotation_property_vw table, which may be used to
+    filter results for the /annotationprops and /annotationprop_ids endpoints.
+    ---
+    tags:
+      - Annotation
+    responses:
+      200:
+          description: Columns in annotation_prop_vw table
+    '''
+    result = initializeResult()
+    showColumns(result, "annotation_property_vw")
+    return generateResponse(result)
+
+
+@app.route('/annotationprop_ids', methods=['GET'])
+def getAnnotationpropIds():
+    '''
+    Get annotation property IDs (with filtering)
+    Return a list of annotation property IDs. The caller can filter on any of
+    the columns in the annotation_property_vw table. Inequalities (!=) and
+    some relational operations (&lt;= and &gt;=) are supported. Wildcards are
+    supported (use "*"). The returned list may be ordered by specifying a
+    column with the _sort key. Multiple columns should be separated by a
+    comma.
+    ---
+    tags:
+      - Annotation
+    responses:
+      200:
+          description: List of one or more annotation property IDs
+      404:
+          description: Annotation properties not found
+    '''
+    result = initializeResult()
+    if executeSQL(result, 'SELECT id FROM annotation_property_vw', 'temp'):
+        result['annotationprop_ids'] = []
+        for c in result['temp']:
+            result['annotationprop_ids'].append(c['id'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/annotationprops/<string:sid>', methods=['GET'])
+def getAnnotationpropsById(sid):
+    '''
+    Get annotation property information for a given ID
+    Given an ID, return a row from the annotation_property_vw table. Specific
+    columns from the annotation_property_vw table can be returned with the
+    _columns key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - Annotation
+    parameters:
+      - in: path
+        name: sid
+        type: string
+        required: true
+        description: annotation property ID
+    responses:
+      200:
+          description: Information for one annotation property
+      404:
+          description: Annotation property ID not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM annotation_property_vw', 'annotationprop_data', sid)
+    return generateResponse(result)
+
+
+@app.route('/annotationprops', methods=['GET'])
+def getAnnotationpropInfo():
+    '''
+    Get annotation property information (with filtering)
+    Return a list of annotation properties (rows from the
+    annotation_property_vw table). The caller can filter on any of the columns
+    in the annotation_property_vw table. Inequalities (!=) and some relational
+    operations (&lt;= and &gt;=) are supported. Wildcards are supported
+    (use "*"). Specific columns from the annotation_property_vw table can be
+    returned with the _columns key. The returned list may be ordered by
+    specifying a column with the _sort key. In both cases, multiple columns
+    would be separated by a comma.
+    ---
+    tags:
+      - Annotation
+    responses:
+      200:
+          description: List of information for one or more annotation
+                       properties
+      404:
+          description: Annotation properties not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM annotation_property_vw', 'annotationprop_data')
     return generateResponse(result)
 
 

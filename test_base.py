@@ -1,6 +1,8 @@
 from mad_responder import app
 import unittest
 
+ANNOTATION_ID = 352848
+ANNOTATIONPROP_ID = 20713727
 ASSIGNMENT_ID = 155
 ASSIGNMENTPROP_ID = 70397
 OPENED = 0
@@ -124,6 +126,61 @@ class TestContent(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['cvterm_data'][0]['cv_term'], 'substack')
         response = self.app.get('/cvterms/0')
+        self.assertEqual(response.status_code, 404)
+
+# ******************************************************************************
+# * Annotation endpoints                                                       *
+# ******************************************************************************
+    def test_annotation_ids(self):
+        response = self.app.get('/annotation_ids?media=00084_2328-2952_6339-6963_3385-4009')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['annotation_ids']), 2)
+        response = self.app.get('/annotation_ids?media=no_such_media')
+        self.assertEqual(response.status_code, 404)
+
+    def test_annotations(self):
+        response = self.app.get('/annotations?media=00084_2328-2952_6339-6963_3385-4009')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['annotation_data']), 2)
+        response = self.app.get('/annotations?media=no_such_media')
+        self.assertEqual(response.status_code, 404)
+
+    def test_annotation_columns(self):
+        response = self.app.get('/annotations/columns')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json['columns']), 11)
+
+    def test_annotation_id(self):
+        response = self.app.get('/annotations/' + str(ANNOTATION_ID))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['annotation_data'][0]['media'], 'hb_focused')
+        response = self.app.get('/annotations/0')
+        self.assertEqual(response.status_code, 404)
+
+    def test_annotationprop_ids(self):
+        response = self.app.get('/annotationprop_ids?type=manager_assignment_note')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['annotationprop_ids']), 3)
+        response = self.app.get('/annotationprop_ids?type=no_such_type')
+        self.assertEqual(response.status_code, 404)
+
+    def test_annotationprops(self):
+        response = self.app.get('/annotationprops?type=manager_assignment_note')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['annotationprop_data']), 3)
+        response = self.app.get('/annotationprops?type=no_such_type')
+        self.assertEqual(response.status_code, 404)
+
+    def test_annotationprop_columns(self):
+        response = self.app.get('/annotationprops/columns')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json['columns']), 8)
+
+    def test_annotationprop_id(self):
+        response = self.app.get('/annotationprops/' + str(ANNOTATIONPROP_ID))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['annotationprop_data'][0]['type'], 'blocks_annotated')
+        response = self.app.get('/annotationprops/0')
         self.assertEqual(response.status_code, 404)
 
 # ******************************************************************************
