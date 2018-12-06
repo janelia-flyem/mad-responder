@@ -5,6 +5,8 @@ ANNOTATION_ID = 352848
 ANNOTATIONPROP_ID = 20713727
 ASSIGNMENT_ID = 155
 ASSIGNMENTPROP_ID = 70397
+MEDIA_ID = 109
+MEDIAPROP_ID = 134443
 OPENED = 0
 STARTED = 0
 
@@ -258,6 +260,61 @@ class TestContent(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['assignmentprop_data'][0]['type'], 'assign_dvid_url')
         response = self.app.get('/assignmentprops/0')
+        self.assertEqual(response.status_code, 404)
+
+# ******************************************************************************
+# * Media endpoints                                                            *
+# ******************************************************************************
+    def test_media_ids(self):
+        response = self.app.get('/media_ids?type=stack')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['media_ids']), 9)
+        response = self.app.get('/media_ids?type=no_such_type')
+        self.assertEqual(response.status_code, 404)
+
+    def test_media(self):
+        response = self.app.get('/media?type=stack')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['media_data']), 9)
+        response = self.app.get('/media?type=no_such_type')
+        self.assertEqual(response.status_code, 404)
+
+    def test_media_columns(self):
+        response = self.app.get('/media/columns')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json['columns']), 6)
+
+    def test_media_id(self):
+        response = self.app.get('/media/' + str(MEDIA_ID))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['media_data'][0]['type'], 'stack')
+        response = self.app.get('/media/0')
+        self.assertEqual(response.status_code, 404)
+
+    def test_mediaprop_ids(self):
+        response = self.app.get('/mediaprop_ids?media=hb_recleave')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['mediaprop_ids']), 9)
+        response = self.app.get('/mediaprop_ids?media=no_such_media')
+        self.assertEqual(response.status_code, 404)
+
+    def test_mediaprops(self):
+        response = self.app.get('/mediaprops?media=hb_recleave')
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json['mediaprop_data']), 9)
+        response = self.app.get('/mediaprops?media=no_such_media')
+        self.assertEqual(response.status_code, 404)
+
+    def test_mediaprop_columns(self):
+        response = self.app.get('/mediaprops/columns')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json['columns']), 6)
+
+    def test_mediaprop_id(self):
+        response = self.app.get('/mediaprops/' + str(MEDIAPROP_ID))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['mediaprop_data'][0]['media'], 'hb_recleave')
+        response = self.app.get('/mediaprops/0')
         self.assertEqual(response.status_code, 404)
 
 # ******************************************************************************

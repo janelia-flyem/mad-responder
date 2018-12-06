@@ -1296,6 +1296,206 @@ def getAssignmentpropInfo():
 
 
 # *****************************************************************************
+# * Media endpoints                                                           *
+# *****************************************************************************
+@app.route('/media/columns', methods=['GET'])
+def getMediaColumns():
+    '''
+    Get columns from media_vw table
+    Show the columns in the media_vw table, which may be used to filter
+    results for the /media and /media_ids endpoints.
+    ---
+    tags:
+      - Media
+    responses:
+      200:
+          description: Columns in media_vw table
+    '''
+    result = initializeResult()
+    showColumns(result, "media_vw")
+    return generateResponse(result)
+
+
+@app.route('/media_ids', methods=['GET'])
+def getMediaIds():
+    '''
+    Get media IDs (with filtering)
+    Return a list of media IDs. The caller can filter on any of the
+    columns in the media_vw table. Inequalities (!=) and some relational
+    operations (&lt;= and &gt;=) are supported. Wildcards are supported
+    (use "*"). The returned list may be ordered by specifying a column with
+    the _sort key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - Media
+    responses:
+      200:
+          description: List of one or more media IDs
+      404:
+          description: Media not found
+    '''
+    result = initializeResult()
+    if executeSQL(result, 'SELECT id FROM media_vw', 'temp'):
+        result['media_ids'] = []
+        for c in result['temp']:
+            result['media_ids'].append(c['id'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/media/<string:sid>', methods=['GET'])
+def getMediaById(sid):
+    '''
+    Get media information for a given ID
+    Given an ID, return a row from the media_vw table. Specific columns
+    from the media_vw table can be returned with the _columns key.
+    Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - Media
+    parameters:
+      - in: path
+        name: sid
+        type: string
+        required: true
+        description: media ID
+    responses:
+      200:
+          description: Information for one media
+      404:
+          description: Media ID not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM media_vw', 'media_data', sid)
+    return generateResponse(result)
+
+
+@app.route('/media', methods=['GET'])
+def getMediaInfo():
+    '''
+    Get media information (with filtering)
+    Return a list of media (rows from the media_vw table). The
+    caller can filter on any of the columns in the media_vw table.
+    Inequalities (!=) and some relational operations (&lt;= and &gt;=) are
+    supported. Wildcards are supported (use "*"). Specific columns from the
+    media_vw table can be returned with the _columns key. The returned
+    list may be ordered by specifying a column with the _sort key. In both
+    cases, multiple columns would be separated by a comma.
+    ---
+    tags:
+      - Media
+    responses:
+      200:
+          description: List of information for one or more media
+      404:
+          description: Media not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM media_vw', 'media_data')
+    return generateResponse(result)
+
+
+@app.route('/mediaprops/columns', methods=['GET'])
+def getMediapropColumns():
+    '''
+    Get columns from media_property_vw table
+    Show the columns in the media_property_vw table, which may be used to
+    filter results for the /mediaprops and /mediaprop_ids endpoints.
+    ---
+    tags:
+      - Media
+    responses:
+      200:
+          description: Columns in media_prop_vw table
+    '''
+    result = initializeResult()
+    showColumns(result, "media_property_vw")
+    return generateResponse(result)
+
+
+@app.route('/mediaprop_ids', methods=['GET'])
+def getMediapropIds():
+    '''
+    Get media property IDs (with filtering)
+    Return a list of media property IDs. The caller can filter on any of
+    the columns in the media_property_vw table. Inequalities (!=) and
+    some relational operations (&lt;= and &gt;=) are supported. Wildcards are
+    supported (use "*"). The returned list may be ordered by specifying a
+    column with the _sort key. Multiple columns should be separated by a
+    comma.
+    ---
+    tags:
+      - Media
+    responses:
+      200:
+          description: List of one or more media property IDs
+      404:
+          description: Media properties not found
+    '''
+    result = initializeResult()
+    if executeSQL(result, 'SELECT id FROM media_property_vw', 'temp'):
+        result['mediaprop_ids'] = []
+        for c in result['temp']:
+            result['mediaprop_ids'].append(c['id'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/mediaprops/<string:sid>', methods=['GET'])
+def getMediapropsById(sid):
+    '''
+    Get media property information for a given ID
+    Given an ID, return a row from the media_property_vw table. Specific
+    columns from the media_property_vw table can be returned with the
+    _columns key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - Media
+    parameters:
+      - in: path
+        name: sid
+        type: string
+        required: true
+        description: media property ID
+    responses:
+      200:
+          description: Information for one media property
+      404:
+          description: Media property ID not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM media_property_vw', 'mediaprop_data', sid)
+    return generateResponse(result)
+
+
+@app.route('/mediaprops', methods=['GET'])
+def getMediapropInfo():
+    '''
+    Get media property information (with filtering)
+    Return a list of media properties (rows from the
+    media_property_vw table). The caller can filter on any of the columns
+    in the media_property_vw table. Inequalities (!=) and some relational
+    operations (&lt;= and &gt;=) are supported. Wildcards are supported
+    (use "*"). Specific columns from the media_property_vw table can be
+    returned with the _columns key. The returned list may be ordered by
+    specifying a column with the _sort key. In both cases, multiple columns
+    would be separated by a comma.
+    ---
+    tags:
+      - Media
+    responses:
+      200:
+          description: List of information for one or more media
+                       properties
+      404:
+          description: Media properties not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM media_property_vw', 'mediaprop_data')
+    return generateResponse(result)
+
+
+# *****************************************************************************
 # * User endpoints                                                            *
 # *****************************************************************************
 @app.route('/users', methods=['GET'])
