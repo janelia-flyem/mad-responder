@@ -2,7 +2,7 @@
 
 [![Waffle.io - Columns and their card count](https://badge.waffle.io/janelia-flyem/mad-responder.svg?columns=all)](https://waffle.io/janelia-flyem/mad-responder) 
 [![Build Status](https://travis-ci.org/janelia-flyem/mad-responder.svg?branch=master)](https://travis-ci.org/janelia-flyem/mad-responder)
-[![Libraries.io for GitHub](https://img.shields.io/librariesio/github/phoenixframework/phoenix.svg)](https://github.com/janelia-flyem/mad-responder)
+[![GitHub last commit](https://img.shields.io/github/last-commit/google/skia.svg)](https://github.com/janelia-flyem/mad-responder)
 
 ##REST API for the MAD database
 
