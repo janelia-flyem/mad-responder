@@ -100,7 +100,7 @@ def initializeResult():
 
 def addKeyValuePair(key, val, separator, sql, bind):
     eprefix = ''
-    if not isinstance (key, str):
+    if not isinstance(key, str):
         key = key.decode('utf-8')
     if re.search(r'[!><]$', key):
         match = re.search(r'[!><]$', key)
@@ -789,6 +789,105 @@ def addCVTerm(): # pragma: no cover
             g.db.commit()
         except Exception as e:
             raise InvalidUsage(sqlError(e), 500)
+    return generateResponse(result)
+
+# *****************************************************************************
+# * Annotation endpoints                                                      *
+# *****************************************************************************
+@app.route('/annotations/columns', methods=['GET'])
+def getAnnotationsColumns():
+    '''
+    Get columns from annotation_vw table
+    Show the columns in the annotation_vw table, which may be used to filter
+    results for the /annotations and /annotation_ids endpoints.
+    ---
+    tags:
+      - Annotation
+    responses:
+      200:
+          description: Columns in annotation_vw table
+    '''
+    result = initializeResult()
+    showColumns(result, "annotation_vw")
+    return generateResponse(result)
+
+
+@app.route('/annotation_ids', methods=['GET'])
+def getAnnotationIds():
+    '''
+    Get annotation IDs (with filtering)
+    Return a list of annotation IDs. The caller can filter on any of the
+    columns in the annotation_vw table. Inequalities (!=) and some relational
+    operations (&lt;= and &gt;=) are supported. Wildcards are supported
+    (use "*"). The returned list may be ordered by specifying a column with
+    the _sort key. Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - Annotation
+    responses:
+      200:
+          description: List of one or more annotation IDs
+      404:
+          description: Annotations not found
+    '''
+    result = initializeResult()
+    if executeSQL(result, 'SELECT id FROM annotation_vw', 'temp'):
+        result['annotation_ids'] = []
+        for c in result['temp']:
+            result['annotation_ids'].append(c['id'])
+        del result['temp']
+    return generateResponse(result)
+
+
+@app.route('/annotations/<string:sid>', methods=['GET'])
+def getAnnotationsById(sid):
+    '''
+    Get annotation information for a given ID
+    Given an ID, return a row from the annotation_vw table. Specific columns
+    from the annotation_vw table can be returned with the _columns key.
+    Multiple columns should be separated by a comma.
+    ---
+    tags:
+      - Annotation
+    parameters:
+      - in: path
+        name: sid
+        type: string
+        required: true
+        description: assignment ID
+    responses:
+      200:
+          description: Information for one annotation
+      404:
+          description: Annotation ID not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM annotation_vw', 'annotation_data', sid)
+    return generateResponse(result)
+
+
+@app.route('/annotations', methods=['GET'])
+def getAnnotationInfo():
+    '''
+    Get annotation information (with filtering)
+    Return a list of annotations (rows from the annotation_vw table). The
+    caller can filter on any of the columns in the annotation_vw table.
+    Inequalities (!=) and some relational operations (&lt;= and &gt;=) are
+    supported. Wildcards are supported (use "*"). Specific columns from the
+    annotation_vw table can be returned with the _columns key. The returned
+    list may be ordered by specifying a column with the _sort key. In both
+    cases, multiple columns would be separated by a comma.
+    ---
+    tags:
+      - Annotation
+    responses:
+      200:
+          description: List of information for one or more annotations
+      404:
+          description: Annotations not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM annotation_vw', 'annotation_data')
     return generateResponse(result)
 
 
