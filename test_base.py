@@ -51,7 +51,7 @@ class TestProcesses(unittest.TestCase):
     def test_processlist(self):
         response = self.app.get('/processlist')
         self.assertEqual(response.status_code, 200)
-        self.assertGreater(len(response.json['processlist_data']), 1)
+        self.assertGreater(len(response.json['data']), 1)
 
 
 class TestErrors(unittest.TestCase):
@@ -81,14 +81,14 @@ class TestContent(unittest.TestCase):
     def test_cv_ids(self):
         response = self.app.get('/cv_ids?name=body_type')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['cv_ids'][0], 70)
+        self.assertEqual(response.json['data'][0], 70)
         response = self.app.get('/cv_ids?name=aint_no_such_cv')
         self.assertEqual(response.status_code, 404)
 
     def test_cvs(self):
         response = self.app.get('/cvs?id=70')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['cv_data'][0]['name'], 'body_type')
+        self.assertEqual(response.json['data'][0]['name'], 'body_type')
         response = self.app.get('/cvs?id=0')
         self.assertEqual(response.status_code, 404)
 
@@ -100,21 +100,21 @@ class TestContent(unittest.TestCase):
     def test_cvs_id(self):
         response = self.app.get('/cvs/70')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['cv_data'][0]['name'], 'body_type')
+        self.assertEqual(response.json['data'][0]['name'], 'body_type')
         response = self.app.get('/cvs/0')
         self.assertEqual(response.status_code, 404)
 
     def test_cvterm_ids(self):
         response = self.app.get('/cvterm_ids?cv_term=substack')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['cvterm_ids'][0], 1824)
+        self.assertEqual(response.json['data'][0], 1824)
         response = self.app.get('/cvterm_ids?cv_term=aint_no_such_cvterm')
         self.assertEqual(response.status_code, 404)
 
     def test_cverms(self):
         response = self.app.get('/cvterms?id=1824')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['cvterm_data'][0]['cv_term'], 'substack')
+        self.assertEqual(response.json['data'][0]['cv_term'], 'substack')
         response = self.app.get('/cvterms?id=0')
         self.assertEqual(response.status_code, 404)
 
@@ -126,7 +126,7 @@ class TestContent(unittest.TestCase):
     def test_cvterms_id(self):
         response = self.app.get('/cvterms/1824')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['cvterm_data'][0]['cv_term'], 'substack')
+        self.assertEqual(response.json['data'][0]['cv_term'], 'substack')
         response = self.app.get('/cvterms/0')
         self.assertEqual(response.status_code, 404)
 
@@ -136,14 +136,14 @@ class TestContent(unittest.TestCase):
     def test_annotation_ids(self):
         response = self.app.get('/annotation_ids?media=00084_2328-2952_6339-6963_3385-4009')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['annotation_ids']), 2)
+        self.assertGreaterEqual(len(response.json['data']), 2)
         response = self.app.get('/annotation_ids?media=no_such_media')
         self.assertEqual(response.status_code, 404)
 
     def test_annotations(self):
         response = self.app.get('/annotations?media=00084_2328-2952_6339-6963_3385-4009')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['annotation_data']), 2)
+        self.assertGreaterEqual(len(response.json['data']), 2)
         response = self.app.get('/annotations?media=no_such_media')
         self.assertEqual(response.status_code, 404)
 
@@ -155,21 +155,21 @@ class TestContent(unittest.TestCase):
     def test_annotation_id(self):
         response = self.app.get('/annotations/' + str(ANNOTATION_ID))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['annotation_data'][0]['media'], 'hb_focused')
+        self.assertEqual(response.json['data'][0]['media'], 'hb_focused')
         response = self.app.get('/annotations/0')
         self.assertEqual(response.status_code, 404)
 
     def test_annotationprop_ids(self):
         response = self.app.get('/annotationprop_ids?type=manager_assignment_note')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['annotationprop_ids']), 3)
+        self.assertGreaterEqual(len(response.json['data']), 3)
         response = self.app.get('/annotationprop_ids?type=no_such_type')
         self.assertEqual(response.status_code, 404)
 
     def test_annotationprops(self):
         response = self.app.get('/annotationprops?type=manager_assignment_note')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['annotationprop_data']), 3)
+        self.assertGreaterEqual(len(response.json['data']), 3)
         response = self.app.get('/annotationprops?type=no_such_type')
         self.assertEqual(response.status_code, 404)
 
@@ -181,7 +181,7 @@ class TestContent(unittest.TestCase):
     def test_annotationprop_id(self):
         response = self.app.get('/annotationprops/' + str(ANNOTATIONPROP_ID))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['annotationprop_data'][0]['type'], 'blocks_annotated')
+        self.assertEqual(response.json['data'][0]['type'], 'blocks_annotated')
         response = self.app.get('/annotationprops/0')
         self.assertEqual(response.status_code, 404)
 
@@ -191,14 +191,14 @@ class TestContent(unittest.TestCase):
     def test_assignment_ids(self):
         response = self.app.get('/assignment_ids?user=shinomiyaa')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignment_ids']), 2955)
+        self.assertGreaterEqual(len(response.json['data']), 2955)
         response = self.app.get('/assignment_ids?user=no_such_user')
         self.assertEqual(response.status_code, 404)
 
     def test_assignments(self):
         response = self.app.get('/assignments?user=shinomiyaa')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignment_data']), 2955)
+        self.assertGreaterEqual(len(response.json['data']), 2955)
         response = self.app.get('/assignments?user=no_such_user')
         self.assertEqual(response.status_code, 404)
 
@@ -210,43 +210,43 @@ class TestContent(unittest.TestCase):
     def test_assignment_id(self):
         response = self.app.get('/assignments/' + str(ASSIGNMENT_ID))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['assignment_data'][0]['is_complete'], 1)
+        self.assertEqual(response.json['data'][0]['is_complete'], 1)
         response = self.app.get('/assignments/0')
         self.assertEqual(response.status_code, 404)
 
     def test_assignments_completed(self):
         response = self.app.get('/assignments_completed?annotation=psd_annot')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignment_data']), 1044)
+        self.assertGreaterEqual(len(response.json['data']), 1044)
 
     def test_assignments_open(self):
         response = self.app.get('/assignments_open')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignment_data']), 1)
-        OPENED = len(response.json['assignment_data'])
+        self.assertGreaterEqual(len(response.json['data']), 1)
+        OPENED = len(response.json['data'])
 
     def test_assignments_started(self):
         response = self.app.get('/assignments_started')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignment_data']), 1)
-        STARTED = len(response.json['assignment_data'])
+        self.assertGreaterEqual(len(response.json['data']), 1)
+        STARTED = len(response.json['data'])
 
     def test_assignments_remaining(self):
         response = self.app.get('/assignments_remaining')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignment_data']), OPENED + STARTED)
+        self.assertGreaterEqual(len(response.json['data']), OPENED + STARTED)
 
     def test_assignmentprop_ids(self):
         response = self.app.get('/assignmentprop_ids?type=tbars_missing_psds')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignmentprop_ids']), 25)
+        self.assertGreaterEqual(len(response.json['data']), 25)
         response = self.app.get('/assignmentprop_ids?type=no_such_type')
         self.assertEqual(response.status_code, 404)
 
     def test_assignmentprops(self):
         response = self.app.get('/assignmentprops?type=tbars_missing_psds')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['assignmentprop_data']), 25)
+        self.assertGreaterEqual(len(response.json['data']), 25)
         response = self.app.get('/assignmentprops?type=no_such_type')
         self.assertEqual(response.status_code, 404)
 
@@ -258,8 +258,18 @@ class TestContent(unittest.TestCase):
     def test_assignmentprop_id(self):
         response = self.app.get('/assignmentprops/' + str(ASSIGNMENTPROP_ID))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['assignmentprop_data'][0]['type'], 'assign_dvid_url')
+        self.assertEqual(response.json['data'][0]['type'], 'assign_dvid_url')
         response = self.app.get('/assignmentprops/0')
+        self.assertEqual(response.status_code, 404)
+
+# ******************************************************************************
+# * DVID endpoints                                                             *
+# ******************************************************************************
+    def test_dvid_instances(self):
+        response = self.app.get('/dvid_instances?media=cx')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['data'][0]['url'], 'http://emdata2.int.janelia.org:8000')
+        response = self.app.get('/dvid_instances?media=no_such_media')
         self.assertEqual(response.status_code, 404)
 
 # ******************************************************************************
@@ -268,14 +278,14 @@ class TestContent(unittest.TestCase):
     def test_media_ids(self):
         response = self.app.get('/media_ids?type=stack')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['media_ids']), 9)
+        self.assertGreaterEqual(len(response.json['data']), 9)
         response = self.app.get('/media_ids?type=no_such_type')
         self.assertEqual(response.status_code, 404)
 
     def test_media(self):
         response = self.app.get('/media?type=stack')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['media_data']), 9)
+        self.assertGreaterEqual(len(response.json['data']), 9)
         response = self.app.get('/media?type=no_such_type')
         self.assertEqual(response.status_code, 404)
 
@@ -287,21 +297,21 @@ class TestContent(unittest.TestCase):
     def test_media_id(self):
         response = self.app.get('/media/' + str(MEDIA_ID))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['media_data'][0]['type'], 'stack')
+        self.assertEqual(response.json['data'][0]['type'], 'stack')
         response = self.app.get('/media/0')
         self.assertEqual(response.status_code, 404)
 
     def test_mediaprop_ids(self):
         response = self.app.get('/mediaprop_ids?media=hb_recleave')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['mediaprop_ids']), 9)
+        self.assertGreaterEqual(len(response.json['data']), 9)
         response = self.app.get('/mediaprop_ids?media=no_such_media')
         self.assertEqual(response.status_code, 404)
 
     def test_mediaprops(self):
         response = self.app.get('/mediaprops?media=hb_recleave')
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json['mediaprop_data']), 9)
+        self.assertGreaterEqual(len(response.json['data']), 9)
         response = self.app.get('/mediaprops?media=no_such_media')
         self.assertEqual(response.status_code, 404)
 
@@ -313,7 +323,7 @@ class TestContent(unittest.TestCase):
     def test_mediaprop_id(self):
         response = self.app.get('/mediaprops/' + str(MEDIAPROP_ID))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['mediaprop_data'][0]['media'], 'hb_recleave')
+        self.assertEqual(response.json['data'][0]['media'], 'hb_recleave')
         response = self.app.get('/mediaprops/0')
         self.assertEqual(response.status_code, 404)
 

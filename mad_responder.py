@@ -47,10 +47,6 @@ def before_request():
     app.config['ENDPOINTS'][endpoint] = app.config['ENDPOINTS'].get(endpoint, 0) + 1
 
 
-@app.teardown_request
-def teardown_request(exception):
-    print(exception)
-
 # *****************************************************************************
 # * Classes                                                                   *
 # *****************************************************************************
@@ -198,14 +194,14 @@ def getAdditionalCVData(sid):
 
 
 def getCVData(result, cvs):
-    result['cv_data'] = []
+    result['data'] = []
     try:
         for c in cvs:
             cv = c
             if ('id' in c) and (not IDCOLUMN):
                 cvrel = getAdditionalCVData(c['id'])
                 cv['relationships'] = list(cvrel)
-            result['cv_data'].append(cv)
+            result['data'].append(cv)
     except Exception as e:
         raise InvalidUsage(sqlError(e), 500)
 
@@ -218,14 +214,14 @@ def getAdditionalCVTermData(sid):
 
 
 def getCVTermData(result, cvterms):
-    result['cvterm_data'] = []
+    result['data'] = []
     try:
         for c in cvterms:
             cvterm = c
             if ('id' in c) and (not IDCOLUMN):
                 cvtermrel = getAdditionalCVTermData(c['id'])
                 cvterm['relationships'] = list(cvtermrel)
-            result['cvterm_data'].append(cvterm)
+            result['data'].append(cvterm)
     except Exception as e:
         raise InvalidUsage(sqlError(e), 500)
 
@@ -349,8 +345,8 @@ def getProcesslistInfo():
           description: Processlist information not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM information_schema.processlist', 'processlist_data')
-    for row in result['processlist_data']:
+    executeSQL(result, 'SELECT * FROM information_schema.processlist', 'data')
+    for row in result['data']:
         row['HOST'] = 'None' if row['HOST'] is None else row['HOST'].decode("utf-8")
     return generateResponse(result)
 
@@ -380,7 +376,7 @@ def getProcesslistHostInfo(): # pragma: no cover
         result['rest']['row_count'] = len(rows)
         for row in rows:
             row['HOST'] = 'None' if row['HOST'] is None else row['HOST'].decode("utf-8")
-        result['processlist_data'] = rows
+        result['data'] = rows
     except Exception as e:
         raise InvalidUsage(sqlError(e), 500)
     return generateResponse(result)
@@ -476,9 +472,9 @@ def getCVIds():
     '''
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM cv', 'temp'):
-        result['cv_ids'] = []
+        result['data'] = []
         for c in result['temp']:
-            result['cv_ids'].append(c['id'])
+            result['data'].append(c['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -650,9 +646,9 @@ def getCVTermIds():
     '''
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM cv_term_vw', 'temp'):
-        result['cvterm_ids'] = []
+        result['data'] = []
         for c in result['temp']:
-            result['cvterm_ids'].append(c['id'])
+            result['data'].append(c['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -832,9 +828,9 @@ def getAnnotationIds():
     '''
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM annotation_vw', 'temp'):
-        result['annotation_ids'] = []
+        result['data'] = []
         for c in result['temp']:
-            result['annotation_ids'].append(c['id'])
+            result['data'].append(c['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -862,7 +858,7 @@ def getAnnotationsById(sid):
           description: Annotation ID not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM annotation_vw', 'annotation_data', sid)
+    executeSQL(result, 'SELECT * FROM annotation_vw', 'data', sid)
     return generateResponse(result)
 
 
@@ -887,7 +883,7 @@ def getAnnotationInfo():
           description: Annotations not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM annotation_vw', 'annotation_data')
+    executeSQL(result, 'SELECT * FROM annotation_vw', 'data')
     return generateResponse(result)
 
 
@@ -930,9 +926,9 @@ def getAnnotationpropIds():
     '''
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM annotation_property_vw', 'temp'):
-        result['annotationprop_ids'] = []
+        result['data'] = []
         for c in result['temp']:
-            result['annotationprop_ids'].append(c['id'])
+            result['data'].append(c['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -960,7 +956,7 @@ def getAnnotationpropsById(sid):
           description: Annotation property ID not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM annotation_property_vw', 'annotationprop_data', sid)
+    executeSQL(result, 'SELECT * FROM annotation_property_vw', 'data', sid)
     return generateResponse(result)
 
 
@@ -987,7 +983,7 @@ def getAnnotationpropInfo():
           description: Annotation properties not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM annotation_property_vw', 'annotationprop_data')
+    executeSQL(result, 'SELECT * FROM annotation_property_vw', 'data')
     return generateResponse(result)
 
 
@@ -1032,9 +1028,9 @@ def getAssignmentIds():
     '''
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM assignment_vw', 'temp'):
-        result['assignment_ids'] = []
+        result['data'] = []
         for c in result['temp']:
-            result['assignment_ids'].append(c['id'])
+            result['data'].append(c['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -1062,7 +1058,7 @@ def getAssignmentsById(sid):
           description: Assignment ID not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_vw', 'assignment_data', sid)
+    executeSQL(result, 'SELECT * FROM assignment_vw', 'data', sid)
     return generateResponse(result)
 
 
@@ -1087,7 +1083,7 @@ def getAssignmentInfo():
           description: Assignments not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_vw', 'assignment_data')
+    executeSQL(result, 'SELECT * FROM assignment_vw', 'data')
     return generateResponse(result)
 
 
@@ -1112,7 +1108,7 @@ def getAssignmentCompletedInfo():
           description: Assignments not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_vw WHERE is_complete=1', 'assignment_data')
+    executeSQL(result, 'SELECT * FROM assignment_vw WHERE is_complete=1', 'data')
     return generateResponse(result)
 
 
@@ -1138,7 +1134,7 @@ def getAssignmentOpen():
           description: Assignments not found
     '''
     result = initializeResult()
-    executeSQL(result, "SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date='0000-00-00'", 'assignment_data')
+    executeSQL(result, "SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date='0000-00-00'", 'data')
     return generateResponse(result)
 
 
@@ -1165,7 +1161,7 @@ def getAssignmentRemainingInfo():
           description: Assignments not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_vw WHERE is_complete=0', 'assignment_data')
+    executeSQL(result, 'SELECT * FROM assignment_vw WHERE is_complete=0', 'data')
     return generateResponse(result)
 
 
@@ -1191,7 +1187,7 @@ def getAssignmentStarted():
           description: Assignments not found
     '''
     result = initializeResult()
-    executeSQL(result, "SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date>'0000-00-00'", 'assignment_data')
+    executeSQL(result, "SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date>'0000-00-00'", 'data')
     return generateResponse(result)
 
 
@@ -1234,9 +1230,9 @@ def getAssignmentpropIds():
     '''
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM assignment_property_vw', 'temp'):
-        result['assignmentprop_ids'] = []
+        result['data'] = []
         for c in result['temp']:
-            result['assignmentprop_ids'].append(c['id'])
+            result['data'].append(c['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -1264,7 +1260,7 @@ def getAssignmentpropsById(sid):
           description: Assignment property ID not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_property_vw', 'assignmentprop_data', sid)
+    executeSQL(result, 'SELECT * FROM assignment_property_vw', 'data', sid)
     return generateResponse(result)
 
 
@@ -1291,7 +1287,7 @@ def getAssignmentpropInfo():
           description: Assignment properties not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_property_vw', 'assignmentprop_data')
+    executeSQL(result, 'SELECT * FROM assignment_property_vw', 'data')
     return generateResponse(result)
 
 
@@ -1336,9 +1332,9 @@ def getMediaIds():
     '''
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM media_vw', 'temp'):
-        result['media_ids'] = []
+        result['data'] = []
         for c in result['temp']:
-            result['media_ids'].append(c['id'])
+            result['data'].append(c['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -1366,7 +1362,7 @@ def getMediaById(sid):
           description: Media ID not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM media_vw', 'media_data', sid)
+    executeSQL(result, 'SELECT * FROM media_vw', 'data', sid)
     return generateResponse(result)
 
 
@@ -1391,7 +1387,7 @@ def getMediaInfo():
           description: Media not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM media_vw', 'media_data')
+    executeSQL(result, 'SELECT * FROM media_vw', 'data')
     return generateResponse(result)
 
 
@@ -1434,9 +1430,9 @@ def getMediapropIds():
     '''
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM media_property_vw', 'temp'):
-        result['mediaprop_ids'] = []
+        result['data'] = []
         for c in result['temp']:
-            result['mediaprop_ids'].append(c['id'])
+            result['data'].append(c['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -1464,7 +1460,7 @@ def getMediapropsById(sid):
           description: Media property ID not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM media_property_vw', 'mediaprop_data', sid)
+    executeSQL(result, 'SELECT * FROM media_property_vw', 'data', sid)
     return generateResponse(result)
 
 
@@ -1491,7 +1487,36 @@ def getMediapropInfo():
           description: Media properties not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM media_property_vw', 'mediaprop_data')
+    executeSQL(result, 'SELECT * FROM media_property_vw', 'data')
+    return generateResponse(result)
+
+
+# *****************************************************************************
+# * DVID endpoints                                                            *
+# *****************************************************************************
+@app.route('/dvid_instances', methods=['GET'])
+def getDVIDInfo():
+    '''
+    Get DVID url/UUID information (with filtering)
+    Return a list of DVID instances along with their properties (rows from the
+    dvid_url_uuid_vw table). The caller can filter on any of the columns in
+    the dvid_url_uuid_vw table. Inequalities (!=) and some relational
+    operations (&lt;= and &gt;=) are supported. Wildcards are supported
+    (use "*"). Specific columns from the dvid_url_uuid_vw table can be
+    returned with the _columns key. The returned list may be ordered by
+    specifying a column with the _sort key. In both cases, multiple columns
+    would be separated by a comma.
+    ---
+    tags:
+      - DVID
+    responses:
+      200:
+          description: List of information for one or more DVID instances
+      404:
+          description: DVID instances not found
+    '''
+    result = initializeResult()
+    executeSQL(result, 'SELECT * FROM dvid_url_uuid_vw', 'data')
     return generateResponse(result)
 
 
@@ -1520,7 +1545,7 @@ def getUserInfo():
           description: Users not found
     '''
     result = initializeResult()
-    executeSQL(result, 'SELECT * FROM user_property_vw', 'user_data')
+    executeSQL(result, 'SELECT * FROM user_property_vw', 'data')
     return generateResponse(result)
 
 
