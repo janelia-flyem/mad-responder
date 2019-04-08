@@ -7,11 +7,11 @@
 [![Requirements Status](https://requires.io/github/janelia-flyem/mad-responder/requirements.svg?branch=master)](https://requires.io/github/janelia-flyem/mad-responder/requirements/?branch=master)
 [![Coverage](https://img.shields.io/codecov/c/github/janelia-flyem/mad-responder.svg)](https://codecov.io/gh/janelia-flyem/mad-responder)
 
-##REST API for the MAD database
+## REST API for the MAD database
 
 This Python Flask app provides REST API endpoints for the MAD database. 
 
-##Installation for Local Development
+## Installation for Local Development
 1. Activate the Python 3.6 environment
 
     ```
@@ -27,7 +27,7 @@ This Python Flask app provides REST API endpoints for the MAD database.
 4. The API is now available at `http://localhost:5000/`. Opening this url in your browser will bring up the API documentation.
 
 
-##Author Information
+## Author Information
 Written by Rob Svirskas (<svirskasr@janelia.hhmi.org>)
 
 [Scientific Computing](http://www.janelia.org/research-resources/computing-resources)  
