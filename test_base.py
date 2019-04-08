@@ -69,7 +69,7 @@ class TestErrors(unittest.TestCase):
     def test_other_error(self):
         response = self.app.get('/test_other_error')
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json['rest']['error'], "Error: division by zero")
+        self.assertIn(response.json['rest']['error'], ["Error: division by zero", "MySQL error [1146]: Table 'mad.cv_term_vw' doesn't exist"])
 
 class TestContent(unittest.TestCase):
     def setUp(self):
