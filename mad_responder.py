@@ -20,6 +20,7 @@ SQL = {
                  + "object_id=%s",
 }
 
+
 __version__ = '0.1.0'
 app = Flask(__name__)
 app.config.from_pyfile("config.cfg")
@@ -34,17 +35,7 @@ app.config['STARTTIME'] = time()
 app.config['STARTDT'] = datetime.now()
 IDCOLUMN = 0
 start_time = ''
-
-
-@app.before_request
-def before_request():
-    global start_time
-    start_time = time()
-    g.db = conn
-    g.c = cursor
-    app.config['COUNTER'] += 1
-    endpoint = request.endpoint if request.endpoint else '(Unknown)'
-    app.config['ENDPOINTS'][endpoint] = app.config['ENDPOINTS'].get(endpoint, 0) + 1
+CVTERMS = dict()
 
 
 # *****************************************************************************
@@ -66,6 +57,35 @@ class InvalidUsage(Exception):
         retval = dict(self.payload or ())
         retval['rest'] = {'error': self.message}
         return retval
+
+# *****************************************************************************
+# * Flask                                                                     *
+# *****************************************************************************
+
+
+@app.before_request
+def before_request():
+    global start_time, CVTERMS
+    start_time = time()
+    g.db = conn
+    g.c = cursor
+    app.config['COUNTER'] += 1
+    endpoint = request.endpoint if request.endpoint else '(Unknown)'
+    app.config['ENDPOINTS'][endpoint] = app.config['ENDPOINTS'].get(endpoint, 0) + 1
+    if request.method == 'OPTIONS':
+        result = initializeResult()
+        return generateResponse(result)
+    if not len(CVTERMS):
+        try:
+            g.c.execute('SELECT cv,cv_term,id FROM cv_term_vw ORDER BY 1,2')
+            rows = g.c.fetchall()
+            for row in rows:
+                if row['cv'] not in CVTERMS:
+                    CVTERMS[row['cv']] = dict()
+                CVTERMS[row['cv']][row['cv_term']] = row['id']
+            print(CVTERMS)
+        except Exception as e:
+            raise InvalidUsage(sqlError(e), 500)
 
 
 # ******************************************************************************
@@ -152,7 +172,7 @@ def generateSQL(result, sql, query=False):
 
 def executeSQL(result, sql, container, query=False):
     sql, bind = generateSQL(result, sql, query)
-    if app.config['DEBUG']:
+    if app.config['DEBUG']: # pragma: no cover
         if bind:
             print(sql % bind)
         else:
@@ -182,6 +202,14 @@ def showColumns(result, table):
             result['columns'] = rows
             result['rest']['row_count'] = len(rows)
         return 1
+    except Exception as e:
+        raise InvalidUsage(sqlError(e), 500)
+
+
+def getCVIDs():
+    try:
+        g.c.execute('SELECT cv,cv_term,id FROM cv_term_vw ORDER BY 1,2')
+        CVTERMS = g.c.fetchall()
     except Exception as e:
         raise InvalidUsage(sqlError(e), 500)
 
@@ -224,6 +252,47 @@ def getCVTermData(result, cvterms):
             result['data'].append(cvterm)
     except Exception as e:
         raise InvalidUsage(sqlError(e), 500)
+
+
+def updateProperty(result, proptype):
+    pd = dict()
+    if request.form:
+        result['rest']['form'] = request.form
+        for i in request.form:
+            pd[i] = request.form[i]
+    elif request.json:
+        result['rest']['json'] = request.json
+        pd = request.json
+    missing = ''
+    for p in ['id', 'cv', 'term', 'value']:
+        if p not in pd:
+            missing = missing + p + ' '
+    if missing:
+        raise InvalidUsage('Missing arguments: ' + missing)
+    sql = 'SELECT id FROM %s WHERE ' % (proptype)
+    sql += 'id=%s'
+    bind = (pd['id'],)
+    try:
+        g.c.execute(sql, bind)
+        rows = g.c.fetchall()
+    except:
+        raise InvalidUsage(sqlError(e), 500)
+    if len(rows) != 1:
+        raise InvalidUsage(('Could not find %s ID %s' % (proptype, pd['id'])), 404)
+    if pd['cv'] in CVTERMS and pd['term'] in CVTERMS[pd['cv']]:
+        sql = 'INSERT INTO %s_property (%s_id,type_id,value) ' % (proptype, proptype)
+        sql += 'VALUES(%s,%s,%s)'
+        bind = (pd['id'], CVTERMS[pd['cv']][pd['term']], pd['value'],)
+        result['rest']['sql_statement'] = sql % bind
+        try:
+            g.c.execute(sql, bind)
+            result['rest']['row_count'] = g.c.rowcount
+            result['rest']['inserted_id'] = g.c.lastrowid
+            g.db.commit()
+            return
+        except Exception as e:
+            raise InvalidUsage(sqlError(e), 500)
+    raise InvalidUsage(('Could not find CV/term %s/%s' % (pd['cv'], pd['term'])), 404)
 
 
 def generateResponse(result):
@@ -575,8 +644,8 @@ def addCV(): # pragma: no cover
           description: Missing arguments
     '''
     result = initializeResult()
-    if request.method == 'OPTIONS':
-        return generateResponse(result)
+    #if request.method == 'OPTIONS':
+    #    return generateResponse(result)
     pd = dict()
     if request.form:
         result['rest']['form'] = request.form
@@ -754,8 +823,8 @@ def addCVTerm(): # pragma: no cover
           description: Missing arguments
     '''
     result = initializeResult()
-    if request.method == 'OPTIONS':
-        return generateResponse(result)
+    #if request.method == 'OPTIONS':
+    #    return generateResponse(result)
     pd = dict()
     if request.form:
         result['rest']['form'] = request.form
@@ -984,6 +1053,45 @@ def getAnnotationpropInfo():
     '''
     result = initializeResult()
     executeSQL(result, 'SELECT * FROM annotation_property_vw', 'data')
+    return generateResponse(result)
+
+
+@app.route('/annotationprop', methods=['OPTIONS', 'POST'])
+def updateAnnotationProperty(): # pragma: no cover
+    '''
+    Add/update an annotation property
+    ---
+    tags:
+      - Annotation
+    parameters:
+      - in: query
+        name: id
+        type: string
+        required: true
+        description: annotation ID
+      - in: query
+        name: cv
+        type: string
+        required: true
+        description: CV name
+      - in: query
+        name: term
+        type: string
+        required: true
+        description: CV term
+      - in: query
+        name: value
+        type: string
+        required: true
+        description: property value
+    responses:
+      200:
+          description: Property added
+      400:
+          description: Missing arguments
+    '''
+    result = initializeResult()
+    updateProperty(result, 'annotation')
     return generateResponse(result)
 
 
