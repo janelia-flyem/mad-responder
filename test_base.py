@@ -92,6 +92,9 @@ class TestContent(unittest.TestCase):
         response = self.app.get('/cvs?id=70&_columns=display_name')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['data'][0]['display_name'], 'Body Type')
+        response = self.app.get('/cvs?_columns=name&_sort=name')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['data'][0]['name'], 'assignment_types')
         response = self.app.get('/cvs?id=0')
         self.assertEqual(response.status_code, 404)
 
