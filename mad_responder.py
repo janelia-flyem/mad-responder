@@ -275,7 +275,7 @@ def updateProperty(result, proptype):
     try:
         g.c.execute(sql, bind)
         rows = g.c.fetchall()
-    except:
+    except Exception as e:
         raise InvalidUsage(sqlError(e), 500)
     if len(rows) != 1:
         raise InvalidUsage(('Could not find %s ID %s' % (proptype, pd['id'])), 404)
