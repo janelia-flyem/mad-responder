@@ -11,5 +11,5 @@ services:
 before_install:
   - mysql -e 'CREATE DATABASE IF NOT EXISTS mad;'
 script: 
-  - python test_base.py TestErrors TestDiagnostics
+  # - python test_base.py TestErrors TestDiagnostics
   - pylint --disable=C,W,R mad_responder.py
