@@ -6,8 +6,10 @@ from datetime import datetime, timedelta
 from time import time
 from urllib.parse import parse_qs
 from flask import Flask, g, render_template, request, jsonify
+from flask.json import JSONEncoder
 from flask_cors import CORS
 from flask_swagger import swagger
+from jwt import decode
 import pymysql.cursors
 
 
@@ -20,9 +22,21 @@ SQL = {
                  + "object_id=%s",
 }
 
+class CustomJSONEncoder(JSONEncoder):
+    def default(self, obj):
+        try:
+            if isinstance(obj, datetime):
+                return obj.strftime('%a, %-d %b %Y %H:%M:%S')
+            iterable = iter(obj)
+        except TypeError:
+            pass
+        else:
+            return list(iterable)
+        return JSONEncoder.default(self, obj)
 
 __version__ = '0.1.0'
 app = Flask(__name__)
+app.json_encoder = CustomJSONEncoder
 app.config.from_pyfile("config.cfg")
 CORS(app)
 conn = pymysql.connect(host=app.config['MYSQL_DATABASE_HOST'],
@@ -83,7 +97,6 @@ def before_request():
                 if row['cv'] not in CVTERMS:
                     CVTERMS[row['cv']] = dict()
                 CVTERMS[row['cv']][row['cv_term']] = row['id']
-            print(CVTERMS)
         except Exception as e:
             raise InvalidUsage(sqlError(e), 500)
 
@@ -111,6 +124,24 @@ def initializeResult():
                        'error': False,
                        'elapsed_time': '',
                        'row_count': 0}}
+    if 'Authorization' in  request.headers:
+        token = re.sub(r'Bearer\s+', '', request.headers['Authorization'])
+        dtok = dict()
+        try:
+            dtok = decode(token, verify=False)
+            if 'user_name' in dtok:
+                result['rest']['user'] = dtok['user_name']
+                app.config['USERS'][dtok['user_name']] = app.config['USERS'].get(dtok['user_name'], 0) + 1
+        except:
+            print("Invalid token received")
+    if app.config['REQUIRE_AUTH'] and request.method in ['DELETE', 'POST']:
+        if 'Authorization' not in request.headers:
+            raise InvalidUsage('You must authorize to use this endpoint', 401)
+        if not {'exp', 'user_name'} <= set(dtok):
+            raise InvalidUsage('Invalid authorization token', 401)
+        now = time()
+        if now > dtok['exp']:
+            raise InvalidUsage('Authorization token is expired', 401)
     return result
 
 
@@ -224,10 +255,10 @@ def getAdditionalCVData(sid):
 def getCVData(result, cvs):
     result['data'] = []
     try:
-        for c in cvs:
-            cv = c
-            if ('id' in c) and (not IDCOLUMN):
-                cvrel = getAdditionalCVData(c['id'])
+        for col in cvs:
+            cv = col
+            if ('id' in col) and (not IDCOLUMN):
+                cvrel = getAdditionalCVData(col['id'])
                 cv['relationships'] = list(cvrel)
             result['data'].append(cv)
     except Exception as e:
@@ -244,10 +275,10 @@ def getAdditionalCVTermData(sid):
 def getCVTermData(result, cvterms):
     result['data'] = []
     try:
-        for c in cvterms:
-            cvterm = c
-            if ('id' in c) and (not IDCOLUMN):
-                cvtermrel = getAdditionalCVTermData(c['id'])
+        for col in cvterms:
+            cvterm = col
+            if ('id' in col) and (not IDCOLUMN):
+                cvtermrel = getAdditionalCVTermData(col['id'])
                 cvterm['relationships'] = list(cvtermrel)
             result['data'].append(cvterm)
     except Exception as e:
@@ -364,6 +395,7 @@ def stats():
                            "python": sys.version,
                            "pid": os.getpid(),
                            "endpoint_counts": app.config['ENDPOINTS'],
+                           "user_counts": app.config['USERS'],
                            "database_connection": db_connection}
         if None in result['stats']['endpoint_counts']:
             del result['stats']['endpoint_counts']
@@ -542,8 +574,8 @@ def getCVIds():
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM cv', 'temp'):
         result['data'] = []
-        for c in result['temp']:
-            result['data'].append(c['id'])
+        for col in result['temp']:
+            result['data'].append(col['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -644,8 +676,6 @@ def addCV(): # pragma: no cover
           description: Missing arguments
     '''
     result = initializeResult()
-    #if request.method == 'OPTIONS':
-    #    return generateResponse(result)
     pd = dict()
     if request.form:
         result['rest']['form'] = request.form
@@ -716,8 +746,8 @@ def getCVTermIds():
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM cv_term_vw', 'temp'):
         result['data'] = []
-        for c in result['temp']:
-            result['data'].append(c['id'])
+        for col in result['temp']:
+            result['data'].append(col['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -823,8 +853,6 @@ def addCVTerm(): # pragma: no cover
           description: Missing arguments
     '''
     result = initializeResult()
-    #if request.method == 'OPTIONS':
-    #    return generateResponse(result)
     pd = dict()
     if request.form:
         result['rest']['form'] = request.form
@@ -898,8 +926,8 @@ def getAnnotationIds():
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM annotation_vw', 'temp'):
         result['data'] = []
-        for c in result['temp']:
-            result['data'].append(c['id'])
+        for col in result['temp']:
+            result['data'].append(col['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -1137,8 +1165,8 @@ def getAssignmentIds():
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM assignment_vw', 'temp'):
         result['data'] = []
-        for c in result['temp']:
-            result['data'].append(c['id'])
+        for col in result['temp']:
+            result['data'].append(col['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -1399,6 +1427,153 @@ def getAssignmentpropInfo():
     return generateResponse(result)
 
 
+@app.route('/start_assignment', methods=['OPTIONS', 'POST'])
+def startAssignment(): # pragma: no cover
+    '''
+    Start an assignment
+    ---
+    tags:
+      - Assignment
+    parameters:
+      - in: query
+        name: id
+        type: string
+        required: true
+        description: assignment ID
+      - in: query
+        name: note
+        type: string
+        required: false
+        description: note
+    responses:
+      200:
+          description: Assignment started
+      400:
+          description: Assignment not started
+    '''
+    result = initializeResult()
+    pd = dict()
+    if request.form:
+        result['rest']['form'] = request.form
+        for i in request.form:
+            pd[i] = request.form[i]
+    if 'id' not in pd:
+        raise InvalidUsage('Missing arguments: id')
+    if not result['rest']['error']:
+        try:
+            if 'note' in pd:
+                stmt = 'UPDATE assignment SET start_date=NOW(),note=%s WHERE id=%s'
+                bind = (pd['note'], pd['id'],)
+            else:
+                stmt = 'UPDATE assignment SET start_date=NOW() WHERE id=%s'
+                bind = (pd['id'],)
+            result['rest']['sql_statement'] = stmt % bind
+            g.c.execute(stmt, bind)
+            result['rest']['row_count'] = g.c.rowcount
+            g.db.commit()
+        except Exception as e:
+            raise InvalidUsage(sqlError(e), 500)
+    return generateResponse(result)
+
+
+@app.route('/complete_assignment', methods=['OPTIONS', 'POST'])
+def completeAssignment(): # pragma: no cover
+    '''
+    Complete an assignment
+    ---
+    tags:
+      - Assignment
+    parameters:
+      - in: query
+        name: id
+        type: string
+        required: true
+        description: assignment ID
+      - in: query
+        name: note
+        type: string
+        required: false
+        description: note
+    responses:
+      200:
+          description: Assignment completed
+      400:
+          description: Assignment not completed
+    '''
+    result = initializeResult()
+    pd = dict()
+    if request.form:
+        result['rest']['form'] = request.form
+        for i in request.form:
+            pd[i] = request.form[i]
+    if 'id' not in pd:
+        raise InvalidUsage('Missing arguments: id')
+    if not result['rest']['error']:
+        try:
+            if 'note' in pd:
+                stmt = 'UPDATE assignment SET complete_date=NOW(),note=%s WHERE id=%s'
+                bind = (pd['note'], pd['id'],)
+            else:
+                stmt = 'UPDATE assignment SET complete_date=NOW() WHERE id=%s'
+                bind = (pd['id'],)
+            result['rest']['sql_statement'] = stmt % bind
+            g.c.execute(stmt, bind)
+            result['rest']['row_count'] = g.c.rowcount
+            g.db.commit()
+        except Exception as e:
+            raise InvalidUsage(sqlError(e), 500)
+    return generateResponse(result)
+
+
+@app.route('/reset_assignment', methods=['OPTIONS', 'POST'])
+def resetAssignment(): # pragma: no cover
+    '''
+    Reset an assignment (remove start and completion times)
+    ---
+    tags:
+      - Assignment
+    parameters:
+      - in: query
+        name: id
+        type: string
+        required: true
+        description: assignment ID
+      - in: query
+        name: note
+        type: string
+        required: false
+        description: note
+    responses:
+      200:
+          description: Assignment reset
+      400:
+          description: Assignment not reset
+    '''
+    result = initializeResult()
+    pd = dict()
+    if request.form:
+        result['rest']['form'] = request.form
+        for i in request.form:
+            pd[i] = request.form[i]
+    if 'id' not in pd:
+        raise InvalidUsage('Missing arguments: id')
+    if not result['rest']['error']:
+        try:
+            if 'note' in pd:
+                stmt = "UPDATE assignment SET start_date=0,complete_date=0,is_complete=0,note=%s WHERE id=%s"
+                bind = (pd['note'], pd['id'],)
+            else:
+                stmt = 'UPDATE assignment SET start_date=0,complete_date=0,is_complete=0 WHERE id=%s'
+                bind = (pd['id'],)
+            result['rest']['sql_statement'] = stmt % bind
+            g.c.execute(stmt, bind)
+            result['rest']['row_count'] = g.c.rowcount
+            g.db.commit()
+        except Exception as e:
+            raise InvalidUsage(sqlError(e), 500)
+    return generateResponse(result)
+
+
 # *****************************************************************************
 # * Media endpoints                                                           *
 # *****************************************************************************
@@ -1441,8 +1616,8 @@ def getMediaIds():
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM media_vw', 'temp'):
         result['data'] = []
-        for c in result['temp']:
-            result['data'].append(c['id'])
+        for col in result['temp']:
+            result['data'].append(col['id'])
         del result['temp']
     return generateResponse(result)
 
@@ -1539,14 +1714,14 @@ def getMediapropIds():
     result = initializeResult()
     if executeSQL(result, 'SELECT id FROM media_property_vw', 'temp'):
         result['data'] = []
-        for c in result['temp']:
-            result['data'].append(c['id'])
+        for col in result['temp']:
+            result['data'].append(col['id'])
         del result['temp']
     return generateResponse(result)
 
 
 @app.route('/mediaprops/<string:sid>', methods=['GET'])
-def getMediapropsById(sid):
+def get_mediaprops_by_id(sid):
     '''
     Get media property information for a given ID
     Given an ID, return a row from the media_property_vw table. Specific
@@ -1573,7 +1748,7 @@ def getMediapropsById(sid):
 
 
 @app.route('/mediaprops', methods=['GET'])
-def getMediapropInfo():
+def get_mediaprop_info():
     '''
     Get media property information (with filtering)
     Return a list of media properties (rows from the
@@ -1603,7 +1778,7 @@ def getMediapropInfo():
 # * DVID endpoints                                                            *
 # *****************************************************************************
 @app.route('/dvid_instances', methods=['GET'])
-def getDVIDInfo():
+def get_dvid_info():
     '''
     Get DVID url/UUID information (with filtering)
     Return a list of DVID instances along with their properties (rows from the
