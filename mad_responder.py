@@ -32,7 +32,7 @@ class CustomJSONEncoder(JSONEncoder):
             pass
         else:
             return list(iterable)
-        return JSONEncoder.default(self, obj)
+        return JSONEncoder.default(self, obj)  # pylint: disable=E0202
 
 __version__ = '0.1.0'
 app = Flask(__name__)
