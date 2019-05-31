@@ -1,8 +1,9 @@
+from datetime import datetime, timedelta
+import json
 import os
 import platform
 import re
 import sys
-from datetime import datetime, timedelta
 from time import time
 from urllib.parse import parse_qs
 from flask import Flask, g, render_template, request, jsonify
@@ -10,7 +11,10 @@ from flask.json import JSONEncoder
 from flask_cors import CORS
 from flask_swagger import swagger
 from jwt import decode
+from kafka import KafkaProducer
+from kafka.errors import KafkaError
 import pymysql.cursors
+import requests
 
 
 # SQL statements
@@ -23,7 +27,7 @@ SQL = {
 }
 
 class CustomJSONEncoder(JSONEncoder):
-    def default(self, obj):
+    def default(self, obj):   # pylint: disable=E0202, W0221
         try:
             if isinstance(obj, datetime):
                 return obj.strftime('%a, %-d %b %Y %H:%M:%S')
@@ -32,12 +36,15 @@ class CustomJSONEncoder(JSONEncoder):
             pass
         else:
             return list(iterable)
-        return JSONEncoder.default(self, obj)  # pylint: disable=E0202
+        return JSONEncoder.default(self, obj)
 
 __version__ = '0.1.0'
 app = Flask(__name__)
 app.json_encoder = CustomJSONEncoder
 app.config.from_pyfile("config.cfg")
+CONFIG = {'config': {'url': app.config['CONFIG_ROOT']}}
+CVTERMS = dict()
+SERVER = dict()
 CORS(app)
 conn = pymysql.connect(host=app.config['MYSQL_DATABASE_HOST'],
                        user=app.config['MYSQL_DATABASE_USER'],
@@ -48,8 +55,7 @@ cursor = conn.cursor()
 app.config['STARTTIME'] = time()
 app.config['STARTDT'] = datetime.now()
 IDCOLUMN = 0
-start_time = ''
-CVTERMS = dict()
+START_TIME = PRODUCER = ''
 
 
 # *****************************************************************************
@@ -79,17 +85,22 @@ class InvalidUsage(Exception):
 
 @app.before_request
 def before_request():
-    global start_time, CVTERMS
-    start_time = time()
+    global START_TIME, CVTERMS, CONFIG, SERVER, PRODUCER
+    START_TIME = time()
     g.db = conn
     g.c = cursor
     app.config['COUNTER'] += 1
     endpoint = request.endpoint if request.endpoint else '(Unknown)'
     app.config['ENDPOINTS'][endpoint] = app.config['ENDPOINTS'].get(endpoint, 0) + 1
     if request.method == 'OPTIONS':
-        result = initializeResult()
-        return generateResponse(result)
-    if not len(CVTERMS):
+        result = initialize_result()
+        return generate_response(result)
+    if not SERVER:
+        data = call_responder('config', 'config/rest_services')
+        CONFIG = data['config']
+        data = call_responder('config', 'config/servers')
+        SERVER = data['config']
+        PRODUCER = KafkaProducer(bootstrap_servers=SERVER['Kafka']['broker_list'])
         try:
             g.c.execute('SELECT cv,cv_term,id FROM cv_term_vw ORDER BY 1,2')
             rows = g.c.fetchall()
@@ -97,8 +108,8 @@ def before_request():
                 if row['cv'] not in CVTERMS:
                     CVTERMS[row['cv']] = dict()
                 CVTERMS[row['cv']][row['cv_term']] = row['id']
-        except Exception as e:
-            raise InvalidUsage(sqlError(e), 500)
+        except Exception as err:
+            raise InvalidUsage(sql_error(err), 500)
 
 
 # ******************************************************************************
@@ -106,18 +117,30 @@ def before_request():
 # ******************************************************************************
 
 
-def sqlError(e):
+def call_responder(server, endpoint):
+    url = CONFIG[server]['url'] + endpoint
+    try:
+        req = requests.get(url)
+    except requests.exceptions.RequestException as err: # pragma no cover
+        print(err)
+        sys.exit(-1)
+    if req.status_code == 200:
+        return req.json()
+    sys.exit(-1)
+
+
+def sql_error(err):
     error_msg = ''
     try:
-        error_msg = "MySQL error [%d]: %s" % (e.args[0], e.args[1])
+        error_msg = "MySQL error [%d]: %s" % (err.args[0], err.args[1])
     except IndexError:
-        error_msg = "Error: %s" % e
+        error_msg = "Error: %s" % err
     if error_msg:
         print(error_msg)
     return error_msg
 
 
-def initializeResult():
+def initialize_result():
     result = {"rest": {'requester': request.remote_addr,
                        'url': request.url,
                        'endpoint': request.endpoint,
@@ -145,7 +168,7 @@ def initializeResult():
     return result
 
 
-def addKeyValuePair(key, val, separator, sql, bind):
+def add_key_value_pair(key, val, separator, sql, bind):
     eprefix = ''
     if not isinstance(key, str):
         key = key.decode('utf-8')
@@ -168,7 +191,7 @@ def addKeyValuePair(key, val, separator, sql, bind):
     return sql, bind
 
 
-def generateSQL(result, sql, query=False):
+def generate_sql(result, sql, query=False):
     bind = ()
     global IDCOLUMN
     IDCOLUMN = 0
@@ -177,9 +200,9 @@ def generateSQL(result, sql, query=False):
     if query_string:
         if not isinstance(query_string, str):
             query_string = query_string.decode('utf-8')
-        pd = parse_qs(query_string)
+        ipd = parse_qs(query_string)
         separator = ' AND' if ' WHERE ' in sql else ' WHERE'
-        for key, val in pd.items():
+        for key, val in ipd.items():
             if key == '_sort':
                 order = ' ORDER BY ' + val[0]
             elif key == '_columns':
@@ -191,7 +214,7 @@ def generateSQL(result, sql, query=False):
                 if 'DISTINCT' not in sql:
                     sql = sql.replace('SELECT', 'SELECT DISTINCT')
             else:
-                sql, bind = addKeyValuePair(key, val, separator, sql, bind)
+                sql, bind = add_key_value_pair(key, val, separator, sql, bind)
                 separator = ' AND'
     sql += order
     if bind:
@@ -201,8 +224,8 @@ def generateSQL(result, sql, query=False):
     return sql, bind
 
 
-def executeSQL(result, sql, container, query=False):
-    sql, bind = generateSQL(result, sql, query)
+def execute_sql(result, sql, container, query=False):
+    sql, bind = generate_sql(result, sql, query)
     if app.config['DEBUG']: # pragma: no cover
         if bind:
             print(sql % bind)
@@ -214,8 +237,8 @@ def executeSQL(result, sql, container, query=False):
         else:
             g.c.execute(sql)
         rows = g.c.fetchall()
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 500)
     result[container] = []
     if rows:
         result[container] = rows
@@ -224,7 +247,7 @@ def executeSQL(result, sql, container, query=False):
     raise InvalidUsage("No rows returned for query %s" % (sql,), 404)
 
 
-def showColumns(result, table):
+def show_columns(result, table):
     result['columns'] = []
     try:
         g.c.execute("SHOW COLUMNS FROM " + table)
@@ -233,87 +256,79 @@ def showColumns(result, table):
             result['columns'] = rows
             result['rest']['row_count'] = len(rows)
         return 1
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 500)
 
 
-def getCVIDs():
-    try:
-        g.c.execute('SELECT cv,cv_term,id FROM cv_term_vw ORDER BY 1,2')
-        CVTERMS = g.c.fetchall()
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
-
-
-def getAdditionalCVData(sid):
+def get_additional_cv_data(sid):
     sid = str(sid)
     g.c.execute(SQL['CVREL'], (sid, sid))
     cvrel = g.c.fetchall()
     return cvrel
 
 
-def getCVData(result, cvs):
+def get_cv_data(result, cvs):
     result['data'] = []
     try:
         for col in cvs:
-            cv = col
+            tcv = col
             if ('id' in col) and (not IDCOLUMN):
-                cvrel = getAdditionalCVData(col['id'])
-                cv['relationships'] = list(cvrel)
-            result['data'].append(cv)
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
+                cvrel = get_additional_cv_data(col['id'])
+                tcv['relationships'] = list(cvrel)
+            result['data'].append(tcv)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 500)
 
 
-def getAdditionalCVTermData(sid):
+def get_additional_cv_term_data(sid):
     sid = str(sid)
     g.c.execute(SQL['CVTERMREL'], (sid, sid))
     cvrel = g.c.fetchall()
     return cvrel
 
 
-def getCVTermData(result, cvterms):
+def get_cv_term_data(result, cvterms):
     result['data'] = []
     try:
         for col in cvterms:
             cvterm = col
             if ('id' in col) and (not IDCOLUMN):
-                cvtermrel = getAdditionalCVTermData(col['id'])
+                cvtermrel = get_additional_cv_term_data(col['id'])
                 cvterm['relationships'] = list(cvtermrel)
             result['data'].append(cvterm)
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 500)
 
 
-def updateProperty(result, proptype):
-    pd = dict()
+def update_property(result, proptype):
+    ipd = dict()
     if request.form:
         result['rest']['form'] = request.form
         for i in request.form:
-            pd[i] = request.form[i]
+            ipd[i] = request.form[i]
     elif request.json:
         result['rest']['json'] = request.json
-        pd = request.json
+        ipd = request.json
     missing = ''
-    for p in ['id', 'cv', 'term', 'value']:
-        if p not in pd:
-            missing = missing + p + ' '
+    for ptmp in ['id', 'cv', 'term', 'value']:
+        if ptmp not in ipd:
+            missing = missing + ptmp + ' '
     if missing:
         raise InvalidUsage('Missing arguments: ' + missing)
     sql = 'SELECT id FROM %s WHERE ' % (proptype)
     sql += 'id=%s'
-    bind = (pd['id'],)
+    bind = (ipd['id'],)
     try:
         g.c.execute(sql, bind)
         rows = g.c.fetchall()
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 500)
     if len(rows) != 1:
-        raise InvalidUsage(('Could not find %s ID %s' % (proptype, pd['id'])), 404)
-    if pd['cv'] in CVTERMS and pd['term'] in CVTERMS[pd['cv']]:
+        raise InvalidUsage(('Could not find %s ID %s' % (proptype, ipd['id'])), 404)
+    if ipd['cv'] in CVTERMS and ipd['term'] in CVTERMS[ipd['cv']]:
         sql = 'INSERT INTO %s_property (%s_id,type_id,value) ' % (proptype, proptype)
         sql += 'VALUES(%s,%s,%s)'
-        bind = (pd['id'], CVTERMS[pd['cv']][pd['term']], pd['value'],)
+        bind = (ipd['id'], CVTERMS[ipd['cv']][ipd['term']], ipd['value'],)
         result['rest']['sql_statement'] = sql % bind
         try:
             g.c.execute(sql, bind)
@@ -321,15 +336,28 @@ def updateProperty(result, proptype):
             result['rest']['inserted_id'] = g.c.lastrowid
             g.db.commit()
             return
-        except Exception as e:
-            raise InvalidUsage(sqlError(e), 500)
-    raise InvalidUsage(('Could not find CV/term %s/%s' % (pd['cv'], pd['term'])), 404)
+        except Exception as err:
+            raise InvalidUsage(sql_error(err), 500)
+    raise InvalidUsage(('Could not find CV/term %s/%s' % (ipd['cv'], ipd['term'])), 404)
 
 
-def generateResponse(result):
-    global start_time
-    result['rest']['elapsed_time'] = str(timedelta(seconds=(time() - start_time)))
+def generate_response(result):
+    global START_TIME
+    result['rest']['elapsed_time'] = str(timedelta(seconds=(time() - START_TIME)))
     return jsonify(**result)
+
+
+def publish(result, message):
+    message['client'] = 'mad_responder'
+    message['user'] = result['rest']['user']
+    message['host'] = request.host_url
+    message['status'] = 200
+    message['time'] = int(time())
+    future = PRODUCER.send(app.config['KAFKA_TOPIC'], json.dumps(message).encode('utf-8'))
+    try:
+        future.get(timeout=10)
+    except KafkaError:
+        print("Failed sending to Kafka!")
 
 
 # *****************************************************************************
@@ -345,17 +373,17 @@ def handle_invalid_usage(error):
 
 
 @app.route('/')
-def showSwagger():
+def show_swagger():
     return render_template('swagger_ui.html')
 
 
 @app.route("/spec")
 def spec():
-    return getDocJson()
+    return get_doc_json()
 
 
 @app.route('/doc')
-def getDocJson():
+def get_doc_json():
     swag = swagger(app)
     swag['info']['version'] = __version__
     swag['info']['title'] = "MAD Responder"
@@ -376,13 +404,13 @@ def stats():
       400:
           description: Stats could not be calculated
     '''
-    result = initializeResult()
+    result = initialize_result()
     db_connection = True
     try:
         g.db.ping(reconnect=False)
-    except Exception as ex:
+    except Exception as err:
         template = "An exception of type {0} occurred. Arguments:{1!r}"
-        message = template.format(type(ex).__name__, ex.args)
+        message = template.format(type(err).__name__, err.args)
         result['rest']['error'] = 'Error: %s' % (message,)
         db_connection = False
     try:
@@ -399,15 +427,15 @@ def stats():
                            "database_connection": db_connection}
         if None in result['stats']['endpoint_counts']:
             del result['stats']['endpoint_counts']
-    except Exception as ex:
+    except Exception as err:
         template = "An exception of type {0} occurred. Arguments:{1!r}"
-        message = template.format(type(ex).__name__, ex.args)
+        message = template.format(type(err).__name__, err.args)
         raise InvalidUsage('Error: %s' % (message,))
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/processlist/columns', methods=['GET'])
-def getProcesslistColumns():
+def get_processlist_columns():
     '''
     Get columns from the system processlist table
     Show the columns in the system processlist table, which may be used to
@@ -419,13 +447,13 @@ def getProcesslistColumns():
       200:
           description: Columns in system processlist table
     '''
-    result = initializeResult()
-    showColumns(result, "information_schema.processlist")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "information_schema.processlist")
+    return generate_response(result)
 
 
 @app.route('/processlist', methods=['GET'])
-def getProcesslistInfo():
+def get_processlist_info():
     '''
     Get processlist information (with filtering)
     Return a list of processlist entries (rows from the system processlist
@@ -445,15 +473,15 @@ def getProcesslistInfo():
       404:
           description: Processlist information not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM information_schema.processlist', 'data')
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM information_schema.processlist', 'data')
     for row in result['data']:
         row['HOST'] = 'None' if row['HOST'] is None else row['HOST'].decode("utf-8")
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/processlist/host', methods=['GET'])
-def getProcesslistHostInfo(): # pragma: no cover
+def get_processlist_host_info(): # pragma: no cover
     '''
     Get processlist information for this host
     Return a list of processlist entries (rows from the system processlist
@@ -467,7 +495,7 @@ def getProcesslistHostInfo(): # pragma: no cover
       404:
           description: Processlist information not found
     '''
-    result = initializeResult()
+    result = initialize_result()
     hostname = platform.node() + '%'
     try:
         sql = "SELECT * FROM information_schema.processlist WHERE host LIKE %s"
@@ -478,9 +506,9 @@ def getProcesslistHostInfo(): # pragma: no cover
         for row in rows:
             row['HOST'] = 'None' if row['HOST'] is None else row['HOST'].decode("utf-8")
         result['data'] = rows
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
-    return generateResponse(result)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 500)
+    return generate_response(result)
 
 
 @app.route("/ping")
@@ -497,12 +525,12 @@ def pingdb():
       400:
           description: Ping unsuccessful
     '''
-    result = initializeResult()
+    result = initialize_result()
     try:
         g.db.ping()
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 400)
-    return generateResponse(result)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 400)
+    return generate_response(result)
 
 
 # *****************************************************************************
@@ -510,33 +538,33 @@ def pingdb():
 # *****************************************************************************
 @app.route('/test_sqlerror', methods=['GET'])
 def testsqlerror():
-    result = initializeResult()
+    result = initialize_result()
     try:
         sql = "SELECT some_column FROM non_existent_table"
         result['rest']['sql_statement'] = sql
         g.c.execute(sql)
         rows = g.c.fetchall()
         return rows
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 500)
 
 
 @app.route('/test_other_error', methods=['GET'])
 def testothererror():
-    result = initializeResult()
+    result = initialize_result()
     try:
         testval = 4 / 0
         result['testval'] = testval
         return result
-    except Exception as e:
-        raise InvalidUsage(sqlError(e), 500)
+    except Exception as err:
+        raise InvalidUsage(sql_error(err), 500)
 
 
 # *****************************************************************************
 # * CV/CV term endpoints                                                      *
 # *****************************************************************************
 @app.route('/cvs/columns', methods=['GET'])
-def getCVColumns():
+def get_cv_columns():
     '''
     Get columns from cv table
     Show the columns in the cv table, which may be used to filter results for
@@ -548,13 +576,13 @@ def getCVColumns():
       200:
           description: Columns in cv table
     '''
-    result = initializeResult()
-    showColumns(result, "cv")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "cv")
+    return generate_response(result)
 
 
 @app.route('/cv_ids', methods=['GET'])
-def getCVIds():
+def get_cv_ids():
     '''
     Get CV IDs (with filtering)
     Return a list of CV IDs. The caller can filter on any of the columns in the
@@ -571,17 +599,17 @@ def getCVIds():
       404:
           description: CVs not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT id FROM cv', 'temp'):
+    result = initialize_result()
+    if execute_sql(result, 'SELECT id FROM cv', 'temp'):
         result['data'] = []
         for col in result['temp']:
             result['data'].append(col['id'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/cvs/<string:sid>', methods=['GET'])
-def getCVById(sid):
+def get_cv_by_id(sid):
     '''
     Get CV information for a given ID
     Given an ID, return a row from the cv table. Specific columns from the cv
@@ -602,15 +630,15 @@ def getCVById(sid):
       404:
           description: CV ID not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT * FROM cv', 'temp', sid):
-        getCVData(result, result['temp'])
+    result = initialize_result()
+    if execute_sql(result, 'SELECT * FROM cv', 'temp', sid):
+        get_cv_data(result, result['temp'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/cvs', methods=['GET'])
-def getCVInfo():
+def get_cv_info():
     '''
     Get CV information (with filtering)
     Return a list of CVs (rows from the cv table). The caller can filter on
@@ -629,15 +657,15 @@ def getCVInfo():
       404:
           description: CVs not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT * FROM cv', 'temp'):
-        getCVData(result, result['temp'])
+    result = initialize_result()
+    if execute_sql(result, 'SELECT * FROM cv', 'temp'):
+        get_cv_data(result, result['temp'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/cv', methods=['OPTIONS', 'POST'])
-def addCV(): # pragma: no cover
+def add_cv(): # pragma: no cover
     '''
     Add CV
     ---
@@ -675,40 +703,40 @@ def addCV(): # pragma: no cover
       400:
           description: Missing arguments
     '''
-    result = initializeResult()
-    pd = dict()
+    result = initialize_result()
+    ipd = dict()
     if request.form:
         result['rest']['form'] = request.form
         for i in request.form:
-            pd[i] = request.form[i]
+            ipd[i] = request.form[i]
     missing = ''
-    for p in ['name', 'definition']:
-        if p not in pd:
-            missing = missing + p + ' '
+    for ptmp in ['name', 'definition']:
+        if ptmp not in ipd:
+            missing = missing + ptmp + ' '
     if missing:
         raise InvalidUsage('Missing arguments: ' + missing)
-    if 'display_name' not in pd:
-        pd['display_name'] = pd['name']
-    if 'version' not in pd:
-        pd['version'] = 1
-    if 'is_current' not in pd:
-        pd['is_current'] = 1
+    if 'display_name' not in ipd:
+        ipd['display_name'] = ipd['name']
+    if 'version' not in ipd:
+        ipd['version'] = 1
+    if 'is_current' not in ipd:
+        ipd['is_current'] = 1
     if not result['rest']['error']:
         try:
-            bind = (pd['name'], pd['definition'], pd['display_name'],
-                    pd['version'], pd['is_current'],)
+            bind = (ipd['name'], ipd['definition'], ipd['display_name'],
+                    ipd['version'], ipd['is_current'],)
             result['rest']['sql_statement'] = SQL['INSERT_CV'] % bind
             g.c.execute(SQL['INSERT_CV'], bind)
             result['rest']['row_count'] = g.c.rowcount
             result['rest']['inserted_id'] = g.c.lastrowid
             g.db.commit()
-        except Exception as e:
-            raise InvalidUsage(sqlError(e), 500)
-    return generateResponse(result)
+        except Exception as err:
+            raise InvalidUsage(sql_error(err), 500)
+    return generate_response(result)
 
 
 @app.route('/cvterms/columns', methods=['GET'])
-def getCVTermColumns():
+def get_cv_term_columns():
     '''
     Get columns from cv_term_vw table
     Show the columns in the cv_term_vw table, which may be used to filter
@@ -720,13 +748,13 @@ def getCVTermColumns():
       200:
           description: Columns in cv_term_vw table
     '''
-    result = initializeResult()
-    showColumns(result, "cv_term_vw")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "cv_term_vw")
+    return generate_response(result)
 
 
 @app.route('/cvterm_ids', methods=['GET'])
-def getCVTermIds():
+def get_cv_term_ids():
     '''
     Get CV term IDs (with filtering)
     Return a list of CV term IDs. The caller can filter on any of the columns
@@ -743,17 +771,17 @@ def getCVTermIds():
       404:
           description: CV terms not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT id FROM cv_term_vw', 'temp'):
+    result = initialize_result()
+    if execute_sql(result, 'SELECT id FROM cv_term_vw', 'temp'):
         result['data'] = []
         for col in result['temp']:
             result['data'].append(col['id'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/cvterms/<string:sid>', methods=['GET'])
-def getCVTermById(sid):
+def get_cv_term_by_id(sid):
     '''
     Get CV term information for a given ID
     Given an ID, return a row from the cv_term_vw table. Specific columns from
@@ -774,15 +802,15 @@ def getCVTermById(sid):
       404:
           description: CV term ID not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT * FROM cv_term_vw', 'temp', sid):
-        getCVTermData(result, result['temp'])
+    result = initialize_result()
+    if execute_sql(result, 'SELECT * FROM cv_term_vw', 'temp', sid):
+        get_cv_term_data(result, result['temp'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/cvterms', methods=['GET'])
-def getCVTermInfo():
+def get_cv_term_info():
     '''
     Get CV term information (with filtering)
     Return a list of CV terms (rows from the cv_term_vw table). The caller can
@@ -801,15 +829,15 @@ def getCVTermInfo():
       404:
           description: CV terms not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT * FROM cv_term_vw', 'temp'):
-        getCVTermData(result, result['temp'])
+    result = initialize_result()
+    if execute_sql(result, 'SELECT * FROM cv_term_vw', 'temp'):
+        get_cv_term_data(result, result['temp'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/cvterm', methods=['OPTIONS', 'POST'])
-def addCVTerm(): # pragma: no cover
+def add_cv_term(): # pragma: no cover
     '''
     Add CV term
     ---
@@ -852,43 +880,43 @@ def addCVTerm(): # pragma: no cover
       400:
           description: Missing arguments
     '''
-    result = initializeResult()
-    pd = dict()
+    result = initialize_result()
+    ipd = dict()
     if request.form:
         result['rest']['form'] = request.form
         for i in request.form:
-            pd[i] = request.form[i]
+            ipd[i] = request.form[i]
     missing = ''
-    for p in ['cv', 'name', 'definition']:
-        if p not in pd:
-            missing = missing + p + ' '
+    for ptmp in ['cv', 'name', 'definition']:
+        if ptmp not in ipd:
+            missing = missing + ptmp + ' '
     if missing:
         raise InvalidUsage('Missing arguments: ' + missing)
-    if 'display_name' not in pd:
-        pd['display_name'] = pd['name']
-    if 'is_current' not in pd:
-        pd['is_current'] = 1
-    if 'data_type' not in pd:
-        pd['data_type'] = 'text'
+    if 'display_name' not in ipd:
+        ipd['display_name'] = ipd['name']
+    if 'is_current' not in ipd:
+        ipd['is_current'] = 1
+    if 'data_type' not in ipd:
+        ipd['data_type'] = 'text'
     if not result['rest']['error']:
         try:
-            bind = (pd['cv'], pd['name'], pd['definition'],
-                    pd['display_name'], pd['is_current'],
-                    pd['data_type'],)
+            bind = (ipd['cv'], ipd['name'], ipd['definition'],
+                    ipd['display_name'], ipd['is_current'],
+                    ipd['data_type'],)
             result['rest']['sql_statement'] = SQL['INSERT_CVTERM'] % bind
             g.c.execute(SQL['INSERT_CVTERM'], bind)
             result['rest']['row_count'] = g.c.rowcount
             result['rest']['inserted_id'] = g.c.lastrowid
             g.db.commit()
-        except Exception as e:
-            raise InvalidUsage(sqlError(e), 500)
-    return generateResponse(result)
+        except Exception as err:
+            raise InvalidUsage(sql_error(err), 500)
+    return generate_response(result)
 
 # *****************************************************************************
 # * Annotation endpoints                                                      *
 # *****************************************************************************
 @app.route('/annotations/columns', methods=['GET'])
-def getAnnotationsColumns():
+def get_annotations_columns():
     '''
     Get columns from annotation_vw table
     Show the columns in the annotation_vw table, which may be used to filter
@@ -900,13 +928,13 @@ def getAnnotationsColumns():
       200:
           description: Columns in annotation_vw table
     '''
-    result = initializeResult()
-    showColumns(result, "annotation_vw")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "annotation_vw")
+    return generate_response(result)
 
 
 @app.route('/annotation_ids', methods=['GET'])
-def getAnnotationIds():
+def get_annotation_ids():
     '''
     Get annotation IDs (with filtering)
     Return a list of annotation IDs. The caller can filter on any of the
@@ -923,17 +951,17 @@ def getAnnotationIds():
       404:
           description: Annotations not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT id FROM annotation_vw', 'temp'):
+    result = initialize_result()
+    if execute_sql(result, 'SELECT id FROM annotation_vw', 'temp'):
         result['data'] = []
         for col in result['temp']:
             result['data'].append(col['id'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/annotations/<string:sid>', methods=['GET'])
-def getAnnotationsById(sid):
+def get_annotations_by_id(sid):
     '''
     Get annotation information for a given ID
     Given an ID, return a row from the annotation_vw table. Specific columns
@@ -954,13 +982,13 @@ def getAnnotationsById(sid):
       404:
           description: Annotation ID not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM annotation_vw', 'data', sid)
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM annotation_vw', 'data', sid)
+    return generate_response(result)
 
 
 @app.route('/annotations', methods=['GET'])
-def getAnnotationInfo():
+def get_annotation_info():
     '''
     Get annotation information (with filtering)
     Return a list of annotations (rows from the annotation_vw table). The
@@ -979,13 +1007,13 @@ def getAnnotationInfo():
       404:
           description: Annotations not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM annotation_vw', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM annotation_vw', 'data')
+    return generate_response(result)
 
 
 @app.route('/annotationprops/columns', methods=['GET'])
-def getAnnotationpropColumns():
+def get_annotationprop_columns():
     '''
     Get columns from annotation_property_vw table
     Show the columns in the annotation_property_vw table, which may be used to
@@ -997,13 +1025,13 @@ def getAnnotationpropColumns():
       200:
           description: Columns in annotation_prop_vw table
     '''
-    result = initializeResult()
-    showColumns(result, "annotation_property_vw")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "annotation_property_vw")
+    return generate_response(result)
 
 
 @app.route('/annotationprop_ids', methods=['GET'])
-def getAnnotationpropIds():
+def get_annotationprop_ids():
     '''
     Get annotation property IDs (with filtering)
     Return a list of annotation property IDs. The caller can filter on any of
@@ -1021,17 +1049,17 @@ def getAnnotationpropIds():
       404:
           description: Annotation properties not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT id FROM annotation_property_vw', 'temp'):
+    result = initialize_result()
+    if execute_sql(result, 'SELECT id FROM annotation_property_vw', 'temp'):
         result['data'] = []
-        for c in result['temp']:
-            result['data'].append(c['id'])
+        for rtmp in result['temp']:
+            result['data'].append(rtmp['id'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/annotationprops/<string:sid>', methods=['GET'])
-def getAnnotationpropsById(sid):
+def get_annotationprops_by_id(sid):
     '''
     Get annotation property information for a given ID
     Given an ID, return a row from the annotation_property_vw table. Specific
@@ -1052,13 +1080,13 @@ def getAnnotationpropsById(sid):
       404:
           description: Annotation property ID not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM annotation_property_vw', 'data', sid)
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM annotation_property_vw', 'data', sid)
+    return generate_response(result)
 
 
 @app.route('/annotationprops', methods=['GET'])
-def getAnnotationpropInfo():
+def get_annotationprop_info():
     '''
     Get annotation property information (with filtering)
     Return a list of annotation properties (rows from the
@@ -1079,13 +1107,13 @@ def getAnnotationpropInfo():
       404:
           description: Annotation properties not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM annotation_property_vw', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM annotation_property_vw', 'data')
+    return generate_response(result)
 
 
 @app.route('/annotationprop', methods=['OPTIONS', 'POST'])
-def updateAnnotationProperty(): # pragma: no cover
+def update_annotation_property(): # pragma: no cover
     '''
     Add/update an annotation property
     ---
@@ -1118,16 +1146,16 @@ def updateAnnotationProperty(): # pragma: no cover
       400:
           description: Missing arguments
     '''
-    result = initializeResult()
-    updateProperty(result, 'annotation')
-    return generateResponse(result)
+    result = initialize_result()
+    update_property(result, 'annotation')
+    return generate_response(result)
 
 
 # *****************************************************************************
 # * Assignment endpoints                                                      *
 # *****************************************************************************
 @app.route('/assignments/columns', methods=['GET'])
-def getAssignmentColumns():
+def get_assignment_columns():
     '''
     Get columns from assignment_vw table
     Show the columns in the assignment_vw table, which may be used to filter
@@ -1139,13 +1167,13 @@ def getAssignmentColumns():
       200:
           description: Columns in assignment_vw table
     '''
-    result = initializeResult()
-    showColumns(result, "assignment_vw")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "assignment_vw")
+    return generate_response(result)
 
 
 @app.route('/assignment_ids', methods=['GET'])
-def getAssignmentIds():
+def get_assignment_ids():
     '''
     Get assignment IDs (with filtering)
     Return a list of assignment IDs. The caller can filter on any of the
@@ -1162,17 +1190,17 @@ def getAssignmentIds():
       404:
           description: Assignments not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT id FROM assignment_vw', 'temp'):
+    result = initialize_result()
+    if execute_sql(result, 'SELECT id FROM assignment_vw', 'temp'):
         result['data'] = []
         for col in result['temp']:
             result['data'].append(col['id'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/assignments/<string:sid>', methods=['GET'])
-def getAssignmentsById(sid):
+def get_assignments_by_id(sid):
     '''
     Get assignment information for a given ID
     Given an ID, return a row from the assignment_vw table. Specific columns
@@ -1193,13 +1221,13 @@ def getAssignmentsById(sid):
       404:
           description: Assignment ID not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_vw', 'data', sid)
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM assignment_vw', 'data', sid)
+    return generate_response(result)
 
 
 @app.route('/assignments', methods=['GET'])
-def getAssignmentInfo():
+def get_assignment_info():
     '''
     Get assignment information (with filtering)
     Return a list of assignments (rows from the assignment_vw table). The
@@ -1218,13 +1246,13 @@ def getAssignmentInfo():
       404:
           description: Assignments not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_vw', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM assignment_vw', 'data')
+    return generate_response(result)
 
 
 @app.route('/assignments_completed', methods=['GET'])
-def getAssignmentCompletedInfo():
+def get_assignment_completed_info():
     '''
     Get completed assignment information (with filtering)
     Return a list of assignments (rows from the assignment_vw table) that have
@@ -1243,13 +1271,13 @@ def getAssignmentCompletedInfo():
       404:
           description: Assignments not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_vw WHERE is_complete=1', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM assignment_vw WHERE is_complete=1', 'data')
+    return generate_response(result)
 
 
 @app.route('/assignments_open', methods=['GET'])
-def getAssignmentOpen():
+def get_assignment_open():
     '''
     Get open assignment information (with filtering)
     Return a list of assignments (rows from the assignment_vw table) that
@@ -1269,13 +1297,13 @@ def getAssignmentOpen():
       404:
           description: Assignments not found
     '''
-    result = initializeResult()
-    executeSQL(result, "SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date='0000-00-00'", 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, "SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date='0000-00-00'", 'data')
+    return generate_response(result)
 
 
 @app.route('/assignments_remaining', methods=['GET'])
-def getAssignmentRemainingInfo():
+def get_assignment_remaining_info():
     '''
     Get remaining assignment information (with filtering)
     Return a list of assignments (rows from the assignment_vw table) that
@@ -1296,13 +1324,13 @@ def getAssignmentRemainingInfo():
       404:
           description: Assignments not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_vw WHERE is_complete=0', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM assignment_vw WHERE is_complete=0', 'data')
+    return generate_response(result)
 
 
 @app.route('/assignments_started', methods=['GET'])
-def getAssignmentStarted():
+def get_assignment_started():
     '''
     Get started assignment information (with filtering)
     Return a list of assignments (rows from the assignment_vw table) that have
@@ -1322,13 +1350,13 @@ def getAssignmentStarted():
       404:
           description: Assignments not found
     '''
-    result = initializeResult()
-    executeSQL(result, "SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date>'0000-00-00'", 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, "SELECT * FROM assignment_vw WHERE is_complete=0 AND start_date>'0000-00-00'", 'data')
+    return generate_response(result)
 
 
 @app.route('/assignmentprops/columns', methods=['GET'])
-def getAssignmentpropColumns():
+def get_assignmentprop_columns():
     '''
     Get columns from assignment_property_vw table
     Show the columns in the assignment_property_vw table, which may be used to
@@ -1340,13 +1368,13 @@ def getAssignmentpropColumns():
       200:
           description: Columns in assignment_prop_vw table
     '''
-    result = initializeResult()
-    showColumns(result, "assignment_property_vw")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "assignment_property_vw")
+    return generate_response(result)
 
 
 @app.route('/assignmentprop_ids', methods=['GET'])
-def getAssignmentpropIds():
+def get_assignmentprop_ids():
     '''
     Get assignment property IDs (with filtering)
     Return a list of assignment property IDs. The caller can filter on any of
@@ -1364,17 +1392,17 @@ def getAssignmentpropIds():
       404:
           description: Assignment properties not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT id FROM assignment_property_vw', 'temp'):
+    result = initialize_result()
+    if execute_sql(result, 'SELECT id FROM assignment_property_vw', 'temp'):
         result['data'] = []
-        for c in result['temp']:
-            result['data'].append(c['id'])
+        for rtmp in result['temp']:
+            result['data'].append(rtmp['id'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/assignmentprops/<string:sid>', methods=['GET'])
-def getAssignmentpropsById(sid):
+def get_assignmentprops_by_id(sid):
     '''
     Get assignment property information for a given ID
     Given an ID, return a row from the assignment_property_vw table. Specific
@@ -1395,13 +1423,13 @@ def getAssignmentpropsById(sid):
       404:
           description: Assignment property ID not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_property_vw', 'data', sid)
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM assignment_property_vw', 'data', sid)
+    return generate_response(result)
 
 
 @app.route('/assignmentprops', methods=['GET'])
-def getAssignmentpropInfo():
+def get_assignmentprop_info():
     '''
     Get assignment property information (with filtering)
     Return a list of assignment properties (rows from the
@@ -1422,13 +1450,13 @@ def getAssignmentpropInfo():
       404:
           description: Assignment properties not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM assignment_property_vw', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM assignment_property_vw', 'data')
+    return generate_response(result)
 
 
 @app.route('/start_assignment', methods=['OPTIONS', 'POST'])
-def startAssignment(): # pragma: no cover
+def start_assignment(): # pragma: no cover
     '''
     Start an assignment
     ---
@@ -1451,33 +1479,39 @@ def startAssignment(): # pragma: no cover
       400:
           description: Assignment not started
     '''
-    result = initializeResult()
-    pd = dict()
+    result = initialize_result()
+    ipd = dict()
     if request.form:
         result['rest']['form'] = request.form
         for i in request.form:
-            pd[i] = request.form[i]
-    if 'id' not in pd:
+            ipd[i] = request.form[i]
+    if 'id' not in ipd:
         raise InvalidUsage('Missing arguments: id')
     if not result['rest']['error']:
         try:
-            if 'note' in pd:
+            if 'note' in ipd:
                 stmt = 'UPDATE assignment SET start_date=NOW(),note=%s WHERE id=%s'
-                bind = (pd['note'], pd['id'],)
+                bind = (ipd['note'], ipd['id'],)
             else:
                 stmt = 'UPDATE assignment SET start_date=NOW() WHERE id=%s'
-                bind = (pd['id'],)
+                bind = (ipd['id'],)
             result['rest']['sql_statement'] = stmt % bind
             g.c.execute(stmt, bind)
             result['rest']['row_count'] = g.c.rowcount
             g.db.commit()
-        except Exception as e:
-            raise InvalidUsage(sqlError(e), 500)
-    return generateResponse(result)
+        except Exception as err:
+            raise InvalidUsage(sql_error(err), 500)
+    if result['rest']['row_count'] == 0:
+        raise InvalidUsage("Assignment ID %s was not found" % (ipd['id']), 404)
+    message = {"category": "assignment", "operation": "start", "mad_id": ipd['id']}
+    if 'note' in ipd:
+        message['note'] = ipd['note']
+    publish(result, message)
+    return generate_response(result)
 
 
 @app.route('/complete_assignment', methods=['OPTIONS', 'POST'])
-def completeAssignment(): # pragma: no cover
+def complete_assignment(): # pragma: no cover
     '''
     Complete an assignment
     ---
@@ -1500,33 +1534,39 @@ def completeAssignment(): # pragma: no cover
       400:
           description: Assignment not completed
     '''
-    result = initializeResult()
-    pd = dict()
+    result = initialize_result()
+    ipd = dict()
     if request.form:
         result['rest']['form'] = request.form
         for i in request.form:
-            pd[i] = request.form[i]
-    if 'id' not in pd:
+            ipd[i] = request.form[i]
+    if 'id' not in ipd:
         raise InvalidUsage('Missing arguments: id')
     if not result['rest']['error']:
         try:
-            if 'note' in pd:
+            if 'note' in ipd:
                 stmt = 'UPDATE assignment SET complete_date=NOW(),note=%s WHERE id=%s'
-                bind = (pd['note'], pd['id'],)
+                bind = (ipd['note'], ipd['id'],)
             else:
                 stmt = 'UPDATE assignment SET complete_date=NOW() WHERE id=%s'
-                bind = (pd['id'],)
+                bind = (ipd['id'],)
             result['rest']['sql_statement'] = stmt % bind
             g.c.execute(stmt, bind)
             result['rest']['row_count'] = g.c.rowcount
             g.db.commit()
-        except Exception as e:
-            raise InvalidUsage(sqlError(e), 500)
-    return generateResponse(result)
+        except Exception as err:
+            raise InvalidUsage(sql_error(err), 500)
+    if result['rest']['row_count'] == 0:
+        raise InvalidUsage("Assignment ID %s was not found" % (ipd['id']), 404)
+    message = {"category": "assignment", "operation": "complete", "mad_id": ipd['id']}
+    if 'note' in ipd:
+        message['note'] = ipd['note']
+    publish(result, message)
+    return generate_response(result)
 
 
 @app.route('/reset_assignment', methods=['OPTIONS', 'POST'])
-def resetAssignment(): # pragma: no cover
+def reset_assignment(): # pragma: no cover
     '''
     Reset an assignment (remove start and completion times)
     ---
@@ -1549,36 +1589,42 @@ def resetAssignment(): # pragma: no cover
       400:
           description: Assignment not reset
     '''
-    result = initializeResult()
-    pd = dict()
+    result = initialize_result()
+    ipd = dict()
     if request.form:
         result['rest']['form'] = request.form
         for i in request.form:
-            pd[i] = request.form[i]
-    if 'id' not in pd:
+            ipd[i] = request.form[i]
+    if 'id' not in ipd:
         raise InvalidUsage('Missing arguments: id')
     if not result['rest']['error']:
         try:
-            if 'note' in pd:
+            if 'note' in ipd:
                 stmt = "UPDATE assignment SET start_date=0,complete_date=0,is_complete=0,note=%s WHERE id=%s"
-                bind = (pd['note'], pd['id'],)
+                bind = (ipd['note'], ipd['id'],)
             else:
                 stmt = 'UPDATE assignment SET start_date=0,complete_date=0,is_complete=0 WHERE id=%s'
-                bind = (pd['id'],)
+                bind = (ipd['id'],)
             result['rest']['sql_statement'] = stmt % bind
             g.c.execute(stmt, bind)
             result['rest']['row_count'] = g.c.rowcount
             g.db.commit()
-        except Exception as e:
-            raise InvalidUsage(sqlError(e), 500)
-    return generateResponse(result)
+        except Exception as err:
+            raise InvalidUsage(sql_error(err), 500)
+    if result['rest']['row_count'] == 0:
+        raise InvalidUsage("Assignment ID %s was not found" % (ipd['id']), 404)
+    message = {"category": "assignment", "operation": "reset", "mad_id": ipd['id']}
+    if 'note' in ipd:
+        message['note'] = ipd['note']
+    publish(result, message)
+    return generate_response(result)
 
 
 # *****************************************************************************
 # * Media endpoints                                                           *
 # *****************************************************************************
 @app.route('/media/columns', methods=['GET'])
-def getMediaColumns():
+def get_media_columns():
     '''
     Get columns from media_vw table
     Show the columns in the media_vw table, which may be used to filter
@@ -1590,13 +1636,13 @@ def getMediaColumns():
       200:
           description: Columns in media_vw table
     '''
-    result = initializeResult()
-    showColumns(result, "media_vw")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "media_vw")
+    return generate_response(result)
 
 
 @app.route('/media_ids', methods=['GET'])
-def getMediaIds():
+def get_media_ids():
     '''
     Get media IDs (with filtering)
     Return a list of media IDs. The caller can filter on any of the
@@ -1613,17 +1659,17 @@ def getMediaIds():
       404:
           description: Media not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT id FROM media_vw', 'temp'):
+    result = initialize_result()
+    if execute_sql(result, 'SELECT id FROM media_vw', 'temp'):
         result['data'] = []
         for col in result['temp']:
             result['data'].append(col['id'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/media/<string:sid>', methods=['GET'])
-def getMediaById(sid):
+def get_media_by_id(sid):
     '''
     Get media information for a given ID
     Given an ID, return a row from the media_vw table. Specific columns
@@ -1644,13 +1690,13 @@ def getMediaById(sid):
       404:
           description: Media ID not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM media_vw', 'data', sid)
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM media_vw', 'data', sid)
+    return generate_response(result)
 
 
 @app.route('/media', methods=['GET'])
-def getMediaInfo():
+def get_media_info():
     '''
     Get media information (with filtering)
     Return a list of media (rows from the media_vw table). The
@@ -1669,13 +1715,13 @@ def getMediaInfo():
       404:
           description: Media not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM media_vw', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM media_vw', 'data')
+    return generate_response(result)
 
 
 @app.route('/mediaprops/columns', methods=['GET'])
-def getMediapropColumns():
+def get_mediaprop_columns():
     '''
     Get columns from media_property_vw table
     Show the columns in the media_property_vw table, which may be used to
@@ -1687,13 +1733,13 @@ def getMediapropColumns():
       200:
           description: Columns in media_prop_vw table
     '''
-    result = initializeResult()
-    showColumns(result, "media_property_vw")
-    return generateResponse(result)
+    result = initialize_result()
+    show_columns(result, "media_property_vw")
+    return generate_response(result)
 
 
 @app.route('/mediaprop_ids', methods=['GET'])
-def getMediapropIds():
+def get_mediaprop_ids():
     '''
     Get media property IDs (with filtering)
     Return a list of media property IDs. The caller can filter on any of
@@ -1711,13 +1757,13 @@ def getMediapropIds():
       404:
           description: Media properties not found
     '''
-    result = initializeResult()
-    if executeSQL(result, 'SELECT id FROM media_property_vw', 'temp'):
+    result = initialize_result()
+    if execute_sql(result, 'SELECT id FROM media_property_vw', 'temp'):
         result['data'] = []
         for col in result['temp']:
             result['data'].append(col['id'])
         del result['temp']
-    return generateResponse(result)
+    return generate_response(result)
 
 
 @app.route('/mediaprops/<string:sid>', methods=['GET'])
@@ -1742,9 +1788,9 @@ def get_mediaprops_by_id(sid):
       404:
           description: Media property ID not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM media_property_vw', 'data', sid)
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM media_property_vw', 'data', sid)
+    return generate_response(result)
 
 
 @app.route('/mediaprops', methods=['GET'])
@@ -1769,9 +1815,9 @@ def get_mediaprop_info():
       404:
           description: Media properties not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM media_property_vw', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM media_property_vw', 'data')
+    return generate_response(result)
 
 
 # *****************************************************************************
@@ -1798,16 +1844,16 @@ def get_dvid_info():
       404:
           description: DVID instances not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM dvid_url_uuid_vw', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM dvid_url_uuid_vw', 'data')
+    return generate_response(result)
 
 
 # *****************************************************************************
 # * User endpoints                                                            *
 # *****************************************************************************
 @app.route('/users', methods=['GET'])
-def getUserInfo():
+def get_user_info():
     '''
     Get user information (with filtering)
     Return a list of users along with their properties (rows from the
@@ -1827,9 +1873,9 @@ def getUserInfo():
       404:
           description: Users not found
     '''
-    result = initializeResult()
-    executeSQL(result, 'SELECT * FROM user_property_vw', 'data')
-    return generateResponse(result)
+    result = initialize_result()
+    execute_sql(result, 'SELECT * FROM user_property_vw', 'data')
+    return generate_response(result)
 
 
 # *****************************************************************************
