@@ -348,9 +348,10 @@ def generate_response(result):
 
 
 def publish(result, message):
+    message['uri'] = request.url
     message['client'] = 'mad_responder'
     message['user'] = result['rest']['user']
-    message['host'] = request.host_url
+    message['host'] = os.uname()[1]
     message['status'] = 200
     message['time'] = int(time())
     future = PRODUCER.send(app.config['KAFKA_TOPIC'], json.dumps(message).encode('utf-8'))
