@@ -7,25 +7,45 @@
 [![Requirements Status](https://requires.io/github/janelia-flyem/mad-responder/requirements.svg?branch=master)](https://requires.io/github/janelia-flyem/mad-responder/requirements/?branch=master)
 [![Coverage](https://img.shields.io/codecov/c/github/janelia-flyem/mad-responder.svg)](https://codecov.io/gh/janelia-flyem/mad-responder)
 
-## REST API for the MAD database
-
+## Summary
 This Python Flask app provides REST API endpoints for the MAD database. 
 
-## Installation for Local Development
-1. Activate the Python 3.6 environment
+## Configuration
 
+This system depends on the [Centralized Config](https://github.com/JaneliaSciComp/Centralized_Config) system, and
+will use the following configurations:
+- rest_services
+- servers
+
+The location of the configuration system is in the config.cfg file as CONFIG_ROOT.
+
+## Deployment
+
+After installing on the production server, take the following steps to start the system:
+```
+cd /opt/flask/mad-responder
+sudo systemctl start gunicorn
+sudo systemctl start nginx
+```
+
+## Development
+1. Create and activate a clean Python 3 environment:
     ```
-    source venv/bin/activate
+    python3 -m venv myenv
+    source myenv/bin/activate
     ```
+1. Install dependencies:
 
-3. Run the application
+    `pip3 install -r requirements.txt`
+1. Run tests:
 
-    ```
-    python mad_responder.py
-    ```
+    `python3 test_base.py`
+1. Start server:
 
-4. The API is now available at `http://localhost:5000/`. Opening this url in your browser will bring up the API documentation.
+    `python3 mad_responder.py`
+1. When you're done, deactivate the virtual environment:
 
+    `deactivate`
 
 ## Author Information
 Written by Rob Svirskas (<svirskasr@janelia.hhmi.org>)
