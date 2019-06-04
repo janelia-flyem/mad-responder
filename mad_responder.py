@@ -6,6 +6,7 @@ import re
 import sys
 from time import time
 from urllib.parse import parse_qs
+import elasticsearch
 from flask import Flask, g, render_template, request, jsonify
 from flask.json import JSONEncoder
 from flask_cors import CORS
@@ -55,7 +56,7 @@ cursor = conn.cursor()
 app.config['STARTTIME'] = time()
 app.config['STARTDT'] = datetime.now()
 IDCOLUMN = 0
-START_TIME = PRODUCER = ''
+START_TIME = ESEARCH = PRODUCER = ''
 
 
 # *****************************************************************************
@@ -85,7 +86,7 @@ class InvalidUsage(Exception):
 
 @app.before_request
 def before_request():
-    global START_TIME, CVTERMS, CONFIG, SERVER, PRODUCER
+    global START_TIME, CVTERMS, CONFIG, ESEARCH, SERVER, PRODUCER
     START_TIME = time()
     g.db = conn
     g.c = cursor
@@ -100,6 +101,13 @@ def before_request():
         CONFIG = data['config']
         data = call_responder('config', 'config/servers')
         SERVER = data['config']
+        try:
+            ESEARCH = elasticsearch.Elasticsearch(SERVER['elk-elastic']['address'])
+        except Exception as ex: # pragma: no cover
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+            print(message)
+            sys.exit(-1)
         PRODUCER = KafkaProducer(bootstrap_servers=SERVER['Kafka']['broker_list'])
         try:
             g.c.execute('SELECT cv,cv_term,id FROM cv_term_vw ORDER BY 1,2')
@@ -117,16 +125,25 @@ def before_request():
 # ******************************************************************************
 
 
-def call_responder(server, endpoint):
+def call_responder(server, endpoint, post=''):
     url = CONFIG[server]['url'] + endpoint
     try:
-        req = requests.get(url)
+        if post:
+            print(post)
+            headers = {'Content-Type': 'application/json'}
+            req = requests.post(url, post, headers=headers)
+            print(req.text)
+        else:
+            req = requests.get(url)
     except requests.exceptions.RequestException as err: # pragma no cover
         print(err)
         sys.exit(-1)
     if req.status_code == 200:
         return req.json()
-    sys.exit(-1)
+    else:
+        print("Could not send request to %s" % (url))
+        print(req)
+        sys.exit(-1)
 
 
 def sql_error(err):
@@ -1608,12 +1625,29 @@ def reset_assignment(): # pragma: no cover
                 bind = (ipd['id'],)
             result['rest']['sql_statement'] = stmt % bind
             g.c.execute(stmt, bind)
-            result['rest']['row_count'] = g.c.rowcount
-            g.db.commit()
         except Exception as err:
             raise InvalidUsage(sql_error(err), 500)
-    if result['rest']['row_count'] == 0:
+    if g.c.rowcount == 0:
         raise InvalidUsage("Assignment ID %s was not found" % (ipd['id']), 404)
+    # Remove from ElasticSearch
+    es_deletes = 0
+    payload = {"query": {"term": {"mad_id": ipd['id']}}}
+    try:
+        searchres = ESEARCH.search(index='mad_activity-*', body=payload)
+    except elasticsearch.NotFoundError:
+        raise InvalidUsage("Index " + index + " does not exist", 404)
+    except Exception as esex: # pragma no cover
+        raise InvalidUsage(str(esex))
+    for hit in searchres['hits']['hits']:
+        try:
+            delres = ESEARCH.delete(index=hit['_index'], doc_type='doc', id=hit['_id'])
+            es_deletes += 1
+        except Exception as esex: # pragma no cover
+            raise InvalidUsage(str(esex))
+    result['rest']['elasticsearch_deletes'] = es_deletes
+    result['rest']['row_count'] = g.c.rowcount
+    g.db.commit()
+    # Publish to Kafka
     message = {"category": "assignment", "operation": "reset", "mad_id": ipd['id']}
     if 'note' in ipd:
         message['note'] = ipd['note']
