@@ -1633,7 +1633,8 @@ def reset_assignment(): # pragma: no cover
     es_deletes = 0
     payload = {"query": {"term": {"mad_id": ipd['id']}}}
     try:
-        searchres = ESEARCH.search(index='mad_activity-*', body=payload)
+        index = 'mad_activity-*'
+        searchres = ESEARCH.search(index=index, body=payload)
     except elasticsearch.NotFoundError:
         raise InvalidUsage("Index " + index + " does not exist", 404)
     except Exception as esex: # pragma no cover
