@@ -125,14 +125,13 @@ def before_request():
 # ******************************************************************************
 
 
-def call_responder(server, endpoint, post=''):
+def call_responder(server, endpoint, payload=''):
     url = CONFIG[server]['url'] + endpoint
     try:
-        if post:
-            print(post)
-            headers = {'Content-Type': 'application/json'}
-            req = requests.post(url, post, headers=headers)
-            print(req.text)
+        if payload:
+            headers = {"Content-Type": "application/json",
+                       "Authorization": "Bearer " + CONFIG[server]['bearer']}
+            req = requests.post(url, headers=headers, json=payload)
         else:
             req = requests.get(url)
     except requests.exceptions.RequestException as err: # pragma no cover
@@ -1172,6 +1171,48 @@ def update_annotation_property(): # pragma: no cover
 # *****************************************************************************
 # * Assignment endpoints                                                      *
 # *****************************************************************************
+@app.route('/unassigned/<string:status>/<string:roi>', methods=['GET'])
+def get_unassigned(status, roi):
+    '''
+    Return a list of neurons pending assignment.
+    Given a status and ROI, return a list of neurons (sorted by timestamp)
+    pending assignment.
+    ---
+    tags:
+      - Assignment
+    parameters:
+      - in: path
+        name: status
+        type: string
+        required: true
+        description: neuron status
+      - in: path
+        name: roi
+        type: string
+        required: true
+        description: neuron ROI
+    responses:
+      200:
+          description: List of unassigned neurons
+      404:
+          description: No neurons found
+    '''
+    result = initialize_result()
+    payload = {"cypher": "MATCH (n:`hemibrain-Neuron`{`" + roi
+               + "`:true}) WHERE n.status=\"" + status + "\" RETURN n"}
+    response = call_responder('neuprint', 'custom/custom', payload)
+    nlist = []
+    if len(response['data']) == 0:
+        raise InvalidUsage('No neurons found', 404)
+    for row in response['data']:
+        ndat = row[0]
+        nlist.append({"body_id": ndat['bodyId'],
+                      "size": ndat['size'],
+                      "timestamp": ndat['timeStamp']})
+        result['data'] = sorted(nlist, key = lambda i: i['timestamp']) 
+    return generate_response(result)
+
+
 @app.route('/assignments/columns', methods=['GET'])
 def get_assignment_columns():
     '''
