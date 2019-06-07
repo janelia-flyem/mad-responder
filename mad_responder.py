@@ -1171,26 +1171,64 @@ def update_annotation_property(): # pragma: no cover
 # *****************************************************************************
 # * Assignment endpoints                                                      *
 # *****************************************************************************
-@app.route('/unassigned/<string:status>/<string:roi>', methods=['GET'])
-def get_unassigned(status, roi):
+@app.route('/unassigned/<string:roi>', methods=['GET'])
+def get_unassigned_roi(roi):
     '''
     Return a list of neurons pending assignment.
-    Given a status and ROI, return a list of neurons (sorted by timestamp)
+    Given an ROI, return a list of neurons (sorted by timestamp)
     pending assignment.
     ---
     tags:
       - Assignment
     parameters:
       - in: path
-        name: status
+        name: roi
         type: string
         required: true
-        description: neuron status
+        description: neuron ROI
+    responses:
+      200:
+          description: List of unassigned neurons
+      404:
+          description: No neurons found
+    '''
+    result = initialize_result()
+    payload = {"cypher": "MATCH (n:`hemibrain-Neuron`{`" + roi
+               + "`:true}) WHERE n.status IN [\"0.5assign\", \"anchor\"] RETURN n"}
+    response = call_responder('neuprint', 'custom/custom', payload)
+    nlist = []
+    if len(response['data']) == 0:
+        raise InvalidUsage('No neurons found', 404)
+    for row in response['data']:
+        ndat = row[0]
+        nlist.append({"body_id": ndat['bodyId'],
+                      "size": ndat['size'],
+                      "status": ndat['status'],
+                      "timestamp": ndat['timeStamp']})
+        result['data'] = sorted(nlist, key = lambda i: i['timestamp']) 
+    return generate_response(result)
+
+
+@app.route('/unassigned/<string:roi>/<string:status>', methods=['GET'])
+def get_unassigned_roi_status(roi, status):
+    '''
+    Return a list of neurons pending assignment.
+    Given an ROI and  status, return a list of neurons (sorted by timestamp)
+    pending assignment.
+    ---
+    tags:
+      - Assignment
+    parameters:
       - in: path
         name: roi
         type: string
         required: true
         description: neuron ROI
+      - in: path
+        name: status
+        type: string
+        required: true
+        description: neuron status
     responses:
       200:
           description: List of unassigned neurons
