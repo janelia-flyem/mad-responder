@@ -1267,8 +1267,6 @@ def get_unassigned_roi_status(roi, status):
           description: No neurons found
     '''
     result = initialize_result()
-    print(roi)
-    print(status)
     roi_list = roi.split(',')
     roi_clause_list = []
     for this_roi in roi_list:
