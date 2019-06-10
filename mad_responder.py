@@ -39,7 +39,7 @@ class CustomJSONEncoder(JSONEncoder):
             return list(iterable)
         return JSONEncoder.default(self, obj)
 
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 app = Flask(__name__)
 app.json_encoder = CustomJSONEncoder
 app.config.from_pyfile("config.cfg")
@@ -125,12 +125,33 @@ def before_request():
 # ******************************************************************************
 
 
+def call_profile (token):
+    server = 'neuprint'
+    url = CONFIG[server]['url'] + 'profile'
+    url = url.replace('/api', '')
+    headers = {"Content-Type": "application/json",
+               "Authorization": "Bearer " + token}
+    try:
+        req = requests.get(url, headers=headers)
+    except requests.exceptions.RequestException as err: # pragma no cover
+        print(err)
+        sys.exit(-1)
+    if req.status_code == 200:
+        return req.json()
+    elif req.status_code == 401:
+        raise InvalidUsage("Please provide a valid Auth Token", 401)
+    else:
+        print("Could not get response from %s" % (url))
+        print(req)
+        sys.exit(-1)
+
+
 def call_responder(server, endpoint, payload=''):
     url = CONFIG[server]['url'] + endpoint
     try:
         if payload:
             headers = {"Content-Type": "application/json",
-                       "Authorization": "Bearer " + CONFIG[server]['bearer']}
+                       "Authorization": "Bearer " + app.config['BEARER']}
             req = requests.post(url, headers=headers, json=payload)
         else:
             req = requests.get(url)
@@ -140,9 +161,8 @@ def call_responder(server, endpoint, payload=''):
     if req.status_code == 200:
         return req.json()
     else:
-        print("Could not send request to %s" % (url))
-        print(req)
-        sys.exit(-1)
+        print("Could not get response from %s: %s" % (url, req.text))
+        raise InvalidUsage(req.text, req.status_code)
 
 
 def sql_error(err):
@@ -166,21 +186,15 @@ def initialize_result():
     if 'Authorization' in  request.headers:
         token = re.sub(r'Bearer\s+', '', request.headers['Authorization'])
         dtok = dict()
-        try:
-            dtok = decode(token, verify=False)
-            if 'user_name' in dtok:
-                result['rest']['user'] = dtok['user_name']
-                app.config['USERS'][dtok['user_name']] = app.config['USERS'].get(dtok['user_name'], 0) + 1
-        except:
-            print("Invalid token received")
-    if app.config['REQUIRE_AUTH'] and request.method in ['DELETE', 'POST']:
-        if 'Authorization' not in request.headers:
-            raise InvalidUsage('You must authorize to use this endpoint', 401)
-        if not {'exp', 'user_name'} <= set(dtok):
-            raise InvalidUsage('Invalid authorization token', 401)
-        now = time()
-        if now > dtok['exp']:
-            raise InvalidUsage('Authorization token is expired', 401)
+        app.config['BEARER'] = token
+        dtok = call_profile(token)
+        result['rest']['user'] = dtok['ImageURL']
+        app.config['USERS'][dtok['ImageURL']] = app.config['USERS'].get(dtok['ImageURL'], 0) + 1
+    elif request.method in ['DELETE', 'POST'] or request.endpoint in app.config['REQUIRE_AUTH']:
+        raise InvalidUsage('You must authorize to use this endpoint', 401)
+    if app.config['LAST_TRANSACTION'] and time() - app.config['LAST_TRANSACTION'] >= app.config['RECONNECT_SECONDS']:
+        g.db.ping()
+    app.config['LAST_TRANSACTION'] = time()
     return result
 
 
@@ -421,6 +435,7 @@ def stats():
       400:
           description: Stats could not be calculated
     '''
+    tbt = time() - app.config['LAST_TRANSACTION']
     result = initialize_result()
     db_connection = True
     try:
@@ -441,6 +456,7 @@ def stats():
                            "pid": os.getpid(),
                            "endpoint_counts": app.config['ENDPOINTS'],
                            "user_counts": app.config['USERS'],
+                           "time_since_last_transaction": tbt,
                            "database_connection": db_connection}
         if None in result['stats']['endpoint_counts']:
             del result['stats']['endpoint_counts']
@@ -1175,8 +1191,8 @@ def update_annotation_property(): # pragma: no cover
 def get_unassigned_roi(roi):
     '''
     Return a list of neurons pending assignment.
-    Given an ROI, return a list of neurons (sorted by timestamp)
-    pending assignment.
+    Given a comma-separated list of ROIs, return a list of neurons (sorted by
+    size) in one of the given ROIs pending assignment.
     ---
     tags:
       - Assignment
@@ -1185,7 +1201,7 @@ def get_unassigned_roi(roi):
         name: roi
         type: string
         required: true
-        description: neuron ROI
+        description: comma-separaed list of neuron ROIs
     responses:
       200:
           description: List of unassigned neurons
@@ -1193,18 +1209,32 @@ def get_unassigned_roi(roi):
           description: No neurons found
     '''
     result = initialize_result()
-    payload = {"cypher": "MATCH (n:`hemibrain-Neuron`{`" + roi
-               + "`:true}) WHERE n.status IN [\"0.5assign\", \"anchor\"] RETURN n"}
+    roi_list = roi.split(',')
+    roi_clause_list = []
+    status_clause = "(n.status=\"0.5assign\" or NOT EXISTS(n.status))"
+    for this_roi in roi_list:
+        roi_clause_list.append('n.`' + this_roi + '`=true')
+    roi_clause = '(' + ' OR '.join(roi_clause_list) + ')'
+    payload = {"cypher": "MATCH (n:`hemibrain-Neuron`) WHERE " + roi_clause + " AND "
+               + status_clause + " RETURN n ORDER BY n.size DESC"}
+    result['rest']['cypher'] = payload['cypher']
     response = call_responder('neuprint', 'custom/custom', payload)
     nlist = []
     if len(response['data']) == 0:
         raise InvalidUsage('No neurons found', 404)
+    result['rest']['row_count'] = len(response['data'])
     for row in response['data']:
         ndat = row[0]
+        status = ''
+        if 'status' in ndat:
+            status = ndat['status']
+        timestamp = ''
+        if 'timestamp' in ndat:
+            timestamp = ndat['timestamp']
         nlist.append({"body_id": ndat['bodyId'],
                       "size": ndat['size'],
-                      "status": ndat['status'],
-                      "timestamp": ndat['timeStamp']})
+                      "status": status,
+                      "timestamp": timestamp})
         result['data'] = sorted(nlist, key = lambda i: i['timestamp']) 
     return generate_response(result)
 
@@ -1212,9 +1242,10 @@ def get_unassigned_roi(roi):
 @app.route('/unassigned/<string:roi>/<string:status>', methods=['GET'])
 def get_unassigned_roi_status(roi, status):
     '''
-    Return a list of neurons pending assignment.
-    Given an ROI and  status, return a list of neurons (sorted by timestamp)
-    pending assignment.
+    Return a list of neurons for a given ROI/status.
+    Given a comma-separated list of ROIs and a comma-separated list of
+    statuses, return a list of neurons (sorted by size) in one of the
+    given ROIs and statuses.
     ---
     tags:
       - Assignment
@@ -1223,30 +1254,49 @@ def get_unassigned_roi_status(roi, status):
         name: roi
         type: string
         required: true
-        description: neuron ROI
+        description: comma-separaed list of neuron ROIs
       - in: path
         name: status
         type: string
         required: true
-        description: neuron status
+        description: comma-separaed list of neuron statuses
     responses:
       200:
-          description: List of unassigned neurons
+          description: List of neurons
       404:
           description: No neurons found
     '''
     result = initialize_result()
-    payload = {"cypher": "MATCH (n:`hemibrain-Neuron`{`" + roi
-               + "`:true}) WHERE n.status=\"" + status + "\" RETURN n"}
+    print(roi)
+    print(status)
+    roi_list = roi.split(',')
+    roi_clause_list = []
+    for this_roi in roi_list:
+        roi_clause_list.append('n.`' + this_roi + '`=true')
+    roi_clause = '(' + ' OR '.join(roi_clause_list) + ')'
+    status_list = status.split(',')
+    status_clause_list = []
+    for this_status in status_list:
+        status_clause_list.append("n.status=\"" + this_status + "\"")
+    status_clause = '(' + ' OR '.join(status_clause_list) + ')'
+    payload = {"cypher": "MATCH (n:`hemibrain-Neuron`) WHERE " + roi_clause + " AND "
+               + status_clause + " RETURN n ORDER BY n.size DESC"}
+    result['rest']['cypher'] = payload['cypher']
+    print(payload['cypher'])
     response = call_responder('neuprint', 'custom/custom', payload)
     nlist = []
     if len(response['data']) == 0:
         raise InvalidUsage('No neurons found', 404)
+    result['rest']['row_count'] = len(response['data'])
     for row in response['data']:
         ndat = row[0]
+        timestamp = ''
+        if 'timestamp' in ndat:
+            timestamp = ndat['timestamp']
         nlist.append({"body_id": ndat['bodyId'],
                       "size": ndat['size'],
-                      "timestamp": ndat['timeStamp']})
+                      "status": ndat['status'],
+                      "timestamp": timestamp})
         result['data'] = sorted(nlist, key = lambda i: i['timestamp']) 
     return generate_response(result)
 
